@@ -40,6 +40,22 @@ app.get("/students/full", async (req, res) => {
   }
 });
 
+// ================= GET ALL STUDENTS (BASIC LIST) =================
+app.get("/students", async (req, res) => {
+  try {
+    const data = await pool.query(`
+      SELECT id, name, register_number, year, semester
+      FROM students
+      ORDER BY id DESC
+    `);
+    res.json(data.rows);
+  } catch (err) {
+    console.error("GET students ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 // ================= ADD STUDENT =================
 app.post("/students", async (req, res) => {
@@ -190,6 +206,22 @@ router.get("/risk/history", async (req, res) => {
     ORDER BY week;
   `);
   res.json(result.rows);
+});
+app.get("/students/risk/history", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        TO_CHAR(predicted_at, 'Week WW') AS week,
+        AVG(dropout_risk) AS avg_risk
+      FROM prediction_history
+      GROUP BY week
+      ORDER BY week;
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET risk history ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 
