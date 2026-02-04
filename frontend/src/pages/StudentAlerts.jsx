@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Box,
@@ -20,7 +20,7 @@ const StudentAlerts = () => {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null);
 
-  const fetchAlerts = async () => {
+  const fetchAlerts = useCallback(async () => {
     if (!studentId) {
       setLoading(false);
       return;
@@ -49,11 +49,11 @@ const StudentAlerts = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [studentId]);
 
   useEffect(() => {
     fetchAlerts();
-  }, [studentId]);
+  }, [fetchAlerts]);
 
   if (role !== "student") {
     return (

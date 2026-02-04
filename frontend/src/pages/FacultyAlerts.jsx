@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Box,
@@ -21,7 +21,7 @@ const FacultyAlerts = () => {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null);
 
-  const fetchAlerts = async () => {
+  const fetchAlerts = useCallback(async () => {
     const normalizedFaculty = normalizeFacultyId(facultyId);
     if (!normalizedFaculty) {
       setLoading(false);
@@ -42,11 +42,11 @@ const FacultyAlerts = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [facultyId]);
 
   useEffect(() => {
     fetchAlerts();
-  }, [facultyId]);
+  }, [fetchAlerts]);
 
   if (role !== "faculty") {
     return (

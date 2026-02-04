@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 const RoleContext = createContext({
   role: "faculty",
@@ -42,7 +42,7 @@ export const RoleProvider = ({ children }) => {
     return localStorage.getItem(STUDENT_STORAGE_KEY) || "";
   });
 
-  const setRole = (nextRole) => {
+  const setRole = useCallback((nextRole) => {
     setRoleState(nextRole);
     if (typeof window !== "undefined") {
       localStorage.setItem(ROLE_STORAGE_KEY, nextRole);
@@ -55,9 +55,9 @@ export const RoleProvider = ({ children }) => {
         setStudentIdState("");
       }
     }
-  };
+  }, []);
 
-  const setEmail = (nextEmail) => {
+  const setEmail = useCallback((nextEmail) => {
     const normalized = (nextEmail || "").trim().toLowerCase();
     setEmailState(normalized);
     if (typeof window !== "undefined") {
@@ -67,7 +67,7 @@ export const RoleProvider = ({ children }) => {
         localStorage.removeItem(EMAIL_STORAGE_KEY);
       }
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (email || typeof window === "undefined") {
@@ -94,7 +94,7 @@ export const RoleProvider = ({ children }) => {
     }
   }, [email, setEmail]);
 
-  const setFacultyId = (nextId) => {
+  const setFacultyId = useCallback((nextId) => {
     const normalized = (nextId || "").trim().toLowerCase();
     setFacultyIdState(normalized);
     if (typeof window !== "undefined") {
@@ -104,9 +104,9 @@ export const RoleProvider = ({ children }) => {
         localStorage.removeItem(FACULTY_STORAGE_KEY);
       }
     }
-  };
+  }, []);
 
-  const setStudentId = (nextId) => {
+  const setStudentId = useCallback((nextId) => {
     const normalized = (nextId || "").trim().toLowerCase();
     setStudentIdState(normalized);
     if (typeof window !== "undefined") {
@@ -116,7 +116,7 @@ export const RoleProvider = ({ children }) => {
         localStorage.removeItem(STUDENT_STORAGE_KEY);
       }
     }
-  };
+  }, []);
 
   const value = useMemo(
     () => ({
@@ -129,7 +129,7 @@ export const RoleProvider = ({ children }) => {
       studentId,
       setStudentId,
     }),
-    [role, email, facultyId, studentId]
+    [role, setRole, email, setEmail, facultyId, setFacultyId, studentId, setStudentId]
   );
 
   return <RoleContext.Provider value={value}>{children}</RoleContext.Provider>;

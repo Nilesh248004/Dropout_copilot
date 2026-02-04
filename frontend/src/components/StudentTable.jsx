@@ -54,7 +54,7 @@ const StudentTable = ({ refresh }) => {
     const handleFocus = () => fetchStudents();
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, []);
+  }, [fetchStudents]);
 
   const handleDelete = async (id) => {
     if (!window.confirm("Delete student permanently?")) return;

@@ -35,7 +35,7 @@ import { getRiskLevel, getRiskScore } from "../utils/risk";
 const Dashboard = () => {
   const { role, facultyId, studentId, email } = useRole();
   const [students, setStudents] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [studentLookupLoading, setStudentLookupLoading] = useState(false);
   const [studentRegNo, setStudentRegNo] = useState("");
   const [studentRecord, setStudentRecord] = useState(null);
@@ -176,7 +176,7 @@ const Dashboard = () => {
     if (role === "student") {
       fetchCounsellingRequests(studentRecord?.id, studentRecord?.faculty_id);
     }
-  }, [role, facultyId, studentRecord?.id, fetchCounsellingRequests]);
+  }, [role, facultyId, studentRecord?.id, studentRecord?.faculty_id, fetchCounsellingRequests]);
 
   useEffect(() => {
     if (role === "student" && studentRecord?.faculty_id) {

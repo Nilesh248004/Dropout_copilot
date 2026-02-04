@@ -328,7 +328,7 @@ const LoginPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [goToDashboard]);
+  }, [goToDashboard, email]);
 
   useEffect(() => {
     if (!googleReady) return;
