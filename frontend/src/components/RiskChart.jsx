@@ -6,8 +6,12 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, Cell
 } from "recharts";
+import { API_BASE_URL } from "../config/api";
+import { useRole } from "../context/RoleContext";
+import { getRiskLevel, getRiskScore } from "../utils/risk";
 
 const RiskCharts = ({ students: propStudents }) => {
+  const { role, facultyId } = useRole();
   const [students, setStudents] = useState(propStudents || []);
   const [loading, setLoading] = useState(true);
   const [weeklyRisk, setWeeklyRisk] = useState([]);
@@ -22,7 +26,11 @@ const RiskCharts = ({ students: propStudents }) => {
 
     const fetchStudents = async () => {
       try {
-        const res = await axios.get("http://localhost:4000/students/full");
+        const params = {};
+        if (role === "faculty" && facultyId) {
+          params.faculty_id = facultyId;
+        }
+        const res = await axios.get(`${API_BASE_URL}/students/full`, { params });
         setStudents(res.data);
       } catch (err) {
         console.error("Chart fetch error", err);
@@ -32,13 +40,15 @@ const RiskCharts = ({ students: propStudents }) => {
     };
 
     fetchStudents();
-  }, [propStudents]);
+  }, [propStudents, role, facultyId]);
 
   // ================= FETCH WEEKLY RISK HISTORY (ALL STUDENTS AVG) =================
   useEffect(() => {
     const fetchWeeklyRisk = async () => {
       try {
-        const res = await axios.get("http://localhost:4000/students/risk/history");
+        const params =
+          role === "faculty" && facultyId ? { faculty_id: facultyId } : undefined;
+        const res = await axios.get(`${API_BASE_URL}/students/risk/history`, { params });
         // Expected format: [{week: 'Week 1', avg_risk: 0.45}, ...]
         const formatted = res.data.map((d) => ({
           week: d.week,
@@ -51,7 +61,7 @@ const RiskCharts = ({ students: propStudents }) => {
     };
 
     fetchWeeklyRisk();
-  }, []);
+  }, [role, facultyId]);
 
   if (loading) {
     return (
@@ -62,11 +72,15 @@ const RiskCharts = ({ students: propStudents }) => {
   }
 
   // ================= DATA TRANSFORMATION =================
-  const dropoutData = students.map((s) => ({
-    name: s.register_number,
-    dropoutRisk: s.risk_score ? s.risk_score * 100 : 0,
-    riskLevel: s.risk_level || "LOW",
-  }));
+  const dropoutData = students.map((s) => {
+    const riskScore = getRiskScore(s);
+    const riskLevel = getRiskLevel(s);
+    return {
+      name: s.register_number,
+      dropoutRisk: riskScore ? riskScore * 100 : 0,
+      riskLevel: riskLevel || "LOW",
+    };
+  });
 
   const cgpaData = students.map((s) => ({
     name: s.register_number,

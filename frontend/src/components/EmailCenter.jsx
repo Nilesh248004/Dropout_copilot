@@ -15,26 +15,29 @@ import {
   Typography,
 } from "@mui/material";
 import { sendEmail } from "../services/emailService";
+import { useRole } from "../context/RoleContext";
 
 const EmailCenter = ({ role }) => {
+  const { role: contextRole, email } = useRole();
+  const activeRole = role || contextRole;
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState(null);
   const [formData, setFormData] = useState({
     subject: "",
     message: "",
-    replyTo: "",
+    toEmail: "",
     recipients: [],
   });
 
   const recipientOptions = useMemo(() => {
-    if (role === "student") {
+    if (activeRole === "student") {
       return ["faculty", "admin"];
     }
-    if (role === "faculty") {
+    if (activeRole === "faculty") {
       return ["student", "admin"];
     }
     return ["student", "faculty"];
-  }, [role]);
+  }, [activeRole]);
 
   const handleChange = (event) => {
     setFormData((prev) => ({ ...prev, [event.target.name]: event.target.value }));
@@ -53,12 +56,16 @@ const EmailCenter = ({ role }) => {
     setSending(true);
     setStatus(null);
     try {
+      if (!email) {
+        throw new Error("Your login email is missing. Please sign in again.");
+      }
       await sendEmail({
-        fromRole: role,
+        fromRole: activeRole,
         toRoles: formData.recipients,
+        fromEmail: email,
+        toEmail: formData.toEmail,
         subject: formData.subject,
         message: formData.message,
-        replyTo: formData.replyTo,
       });
       setStatus({ type: "success", message: "Email sent successfully." });
       setFormData((prev) => ({ ...prev, subject: "", message: "" }));
@@ -81,10 +88,16 @@ const EmailCenter = ({ role }) => {
             Send role-based updates and queries directly to the relevant stakeholders.
           </Typography>
         </Box>
-        <Chip label={`From: ${role}`} color="secondary" sx={{ ml: { md: "auto" } }} />
+        <Chip label={`From: ${activeRole}`} color="secondary" sx={{ ml: { md: "auto" } }} />
       </Stack>
 
       <Divider sx={{ mb: 3 }} />
+
+      {!email && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Your login email is missing. Please sign in again.
+        </Alert>
+      )}
 
       <form onSubmit={handleSubmit}>
         <Stack spacing={2}>
@@ -107,12 +120,12 @@ const EmailCenter = ({ role }) => {
           </FormControl>
 
           <TextField
-            label="Reply-to Email"
-            name="replyTo"
-            type="email"
-            value={formData.replyTo}
+            label="To Email"
+            name="toEmail"
+            value={formData.toEmail}
             onChange={handleChange}
             fullWidth
+            helperText="Use a single email address or comma-separated list"
           />
           <TextField
             label="Subject"
@@ -134,7 +147,12 @@ const EmailCenter = ({ role }) => {
           <Button
             variant="contained"
             type="submit"
-            disabled={sending || formData.recipients.length === 0}
+            disabled={
+              sending ||
+              formData.recipients.length === 0 ||
+              !String(formData.toEmail || "").trim() ||
+              !email
+            }
           >
             {sending ? "Sending..." : "Send Email"}
           </Button>

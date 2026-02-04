@@ -10,6 +10,7 @@ import {
   Alert,
 } from "@mui/material";
 import axios from "axios";
+import { API_BASE_URL, ML_BASE_URL } from "../config/api";
 import { useNavigate } from "react-router-dom";
 
 const AddStudent = () => {
@@ -50,7 +51,7 @@ const AddStudent = () => {
 
       // 1️⃣ Add student to backend
       const addResponse = await axios.post(
-        "http://localhost:4000/students",
+        `${API_BASE_URL}/students`,
         formData,
         { headers: { "Content-Type": "application/json" } }
       );
@@ -61,7 +62,7 @@ const AddStudent = () => {
 
       // 2️⃣ Call ML API to get risk prediction
       const mlResponse = await axios.post(
-        "http://127.0.0.1:8000/predict",
+        `${ML_BASE_URL}/predict`,
         {
           attendance: Number(formData.attendance),
           cgpa: Number(formData.cgpa),

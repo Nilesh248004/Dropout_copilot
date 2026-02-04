@@ -4,6 +4,7 @@ import {
   Button, Box, CircularProgress
 } from "@mui/material";
 import axios from "axios";
+import { API_BASE_URL, ML_BASE_URL } from "../config/api";
 
 const PredictionCard = ({ student, onSaved }) => {
   const [formData, setFormData] = useState({
@@ -54,11 +55,11 @@ const PredictionCard = ({ student, onSaved }) => {
       };
 
       // ML Prediction
-      const res = await axios.post("http://localhost:8000/predict", payload);
+      const res = await axios.post(`${ML_BASE_URL}/predict`, payload);
       setPrediction(res.data);
 
       // Save to DB
-      await axios.put(`http://localhost:4000/students/${student.id}/risk`, {
+      await axios.put(`${API_BASE_URL}/students/${student.id}/risk`, {
         risk_score: res.data.risk_score,
         dropout: res.data.dropout,
       });

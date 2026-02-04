@@ -1,96 +1,92 @@
 // src/pages/StudentList.jsx
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import {
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Paper, Button, Box, CircularProgress, Dialog, DialogTitle,
-  DialogContent, DialogActions, TextField, Chip
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Button,
+  Box,
+  CircularProgress,
+  Chip,
+  Alert,
 } from "@mui/material";
+import { API_BASE_URL } from "../config/api";
+import { useRole } from "../context/RoleContext";
+import { filterStudentsByFaculty } from "../utils/faculty";
+import { getRiskLevel, getRiskScore } from "../utils/risk";
 
-const StudentList = ({ reload, onDelete }) => {
-  const [students, setStudents] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [openPredict, setOpenPredict] = useState(false);
-  const [selectedStudent, setSelectedStudent] = useState(null);
-  const [predicting, setPredicting] = useState(false);
-
-  const [formData, setFormData] = useState({
-    attendance: 75,
-    cgpa: 7,
-    arrear_count: 0,
-    fees_paid: 1,
-  });
+const StudentList = ({ students: propStudents, reload }) => {
+  const { role, facultyId } = useRole();
+  const [students, setStudents] = useState(propStudents || []);
+  const [loading, setLoading] = useState(!Array.isArray(propStudents));
+  const [predictingId, setPredictingId] = useState(null);
 
   // ================= FETCH STUDENTS ==================
-  const fetchStudents = async () => {
+  const fetchStudents = useCallback(async () => {
     try {
-      const res = await axios.get("http://localhost:4000/students/full");
-      setStudents(res.data);
+      setLoading(true);
+      if (role === "faculty" && !facultyId) {
+        setStudents([]);
+        return;
+      }
+      const params = {};
+      if (role === "faculty" && facultyId) {
+        params.faculty_id = facultyId;
+      }
+      const res = await axios.get(`${API_BASE_URL}/students/full`, { params });
+      const incoming = Array.isArray(res.data) ? res.data : [];
+      const scoped =
+        role === "faculty" ? filterStudentsByFaculty(incoming, facultyId) : incoming;
+      setStudents(scoped);
     } catch (err) {
       console.error("Fetch Error:", err.message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [role, facultyId]);
 
   useEffect(() => {
+    if (Array.isArray(propStudents)) {
+      const scoped =
+        role === "faculty" ? filterStudentsByFaculty(propStudents, facultyId) : propStudents;
+      setStudents(scoped);
+      setLoading(false);
+      return;
+    }
     fetchStudents();
-  }, []);
+  }, [propStudents, fetchStudents, role, facultyId]);
 
-  // ================= OPEN PREDICT FORM ==================
-  const handlePredictClick = (s) => {
-    setSelectedStudent(s);
-    setFormData({
-      attendance: s.attendance ?? 75,
-      cgpa: s.cgpa ?? 7,
-      arrear_count: s.arrear_count ?? 0,
-      fees_paid: s.fees_paid ?? 1,
-    });
-    setOpenPredict(true);
-  };
-
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
-
-  // ================= SAVE PREDICTION ==================
-  const savePrediction = async (studentId, data) => {
-    await axios.post("http://localhost:4000/prediction/save", {
-      student_id: studentId,
-      dropout_prediction: data.dropout_prediction,
-      risk_score: data.risk_score,
-      risk_level: data.risk_level
-    });
-  };
+  useEffect(() => {
+    if (Array.isArray(propStudents)) return;
+    const handleFocus = () => fetchStudents();
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [propStudents, fetchStudents]);
 
   // ================= RUN PREDICTION ==================
-  const runPrediction = async () => {
+  const runPrediction = async (studentId) => {
     try {
-      setPredicting(true);
-
-      await axios.put(`http://localhost:4000/academic/${selectedStudent.id}`, {
-        attendance: Number(formData.attendance),
-        cgpa: Number(formData.cgpa),
-        arrear_count: Number(formData.arrear_count),
-        fees_paid: Number(formData.fees_paid),
-      });
-
-      const res = await axios.post(`http://localhost:4000/predict/${selectedStudent.id}`);
+      setPredictingId(studentId);
+      const res = await axios.post(`${API_BASE_URL}/predict/${studentId}`);
       const data = res.data;
 
       alert(`Risk: ${data.risk_level} | Score: ${(data.risk_score * 100).toFixed(2)}%`);
 
-      await savePrediction(selectedStudent.id, data);
-
-      await fetchStudents(); // refresh UI
-      if (reload) reload();
-
-      setOpenPredict(false);
+      if (reload) await reload();
+      if (!Array.isArray(propStudents)) {
+        await fetchStudents(); // refresh UI
+      }
     } catch (err) {
       console.error("Prediction Error:", err);
-      alert("Prediction failed");
+      const message = err.response?.data?.error || "Prediction failed";
+      alert(message);
     } finally {
-      setPredicting(false);
+      setPredictingId(null);
     }
   };
 
@@ -108,6 +104,24 @@ const StudentList = ({ reload, onDelete }) => {
     }
   };
 
+  const hasCompleteAcademic = (s) =>
+    s.attendance !== null &&
+    s.attendance !== undefined &&
+    s.cgpa !== null &&
+    s.cgpa !== undefined &&
+    s.arrear_count !== null &&
+    s.arrear_count !== undefined &&
+    s.fees_paid !== null &&
+    s.fees_paid !== undefined;
+
+  if (role === "faculty" && !facultyId) {
+    return (
+      <Alert severity="warning">
+        Faculty ID is required to load your students. Please sign in again.
+      </Alert>
+    );
+  }
+
   if (loading) return <CircularProgress />;
 
   return (
@@ -116,80 +130,70 @@ const StudentList = ({ reload, onDelete }) => {
         <Table>
           <TableHead>
             <TableRow>
-              {["Name","Reg No","Year","Sem","Attendance","CGPA","Fees","Risk Score","Actions"].map(h =>
+              {[
+                "Name",
+                "Reg No",
+                "Year",
+                "Sem",
+                "Phone",
+                "Attendance",
+                "CGPA",
+                "Arrears",
+                "Fees",
+                "Disciplinary",
+                "Risk Score",
+                "Actions",
+              ].map((h) => (
                 <TableCell key={h}><b>{h}</b></TableCell>
-              )}
+              ))}
             </TableRow>
           </TableHead>
 
           <TableBody>
-            {students.map(s => (
+            {students.map((s) => {
+              const riskScore = getRiskScore(s);
+              const riskLevel = getRiskLevel(s);
+              return (
               <TableRow key={s.id}>
-                <TableCell>{s.name}</TableCell>
-                <TableCell>{s.register_number}</TableCell>
-                <TableCell>{s.year}</TableCell>
-                <TableCell>{s.semester}</TableCell>
-                <TableCell>{s.attendance}</TableCell>
-                <TableCell>{s.cgpa}</TableCell>
-                <TableCell>{s.fees_paid ? "Yes" : "No"}</TableCell>
+              <TableCell>{s.name}</TableCell>
+              <TableCell>{s.register_number}</TableCell>
+              <TableCell>{s.year}</TableCell>
+              <TableCell>{s.semester}</TableCell>
+              <TableCell>{s.phone_number ?? "N/A"}</TableCell>
+              <TableCell>{s.attendance ?? "N/A"}</TableCell>
+              <TableCell>{s.cgpa ?? "N/A"}</TableCell>
+              <TableCell>{s.arrear_count ?? "N/A"}</TableCell>
+              <TableCell>{s.fees_paid === null || s.fees_paid === undefined ? "N/A" : s.fees_paid ? "Yes" : "No"}</TableCell>
+              <TableCell>{s.disciplinary_issues ?? "N/A"}</TableCell>
 
                 {/* ✅ SHOW PREDICTION SCORE */}
                 <TableCell>
-                  {s.risk_level ? (
+                  {riskScore !== null ? (
                     <Chip
-                      label={`${(s.risk_score * 100).toFixed(2)}% - ${s.risk_level}`}
-                      color={riskColor(s.risk_level)}
+                      label={`${(riskScore * 100).toFixed(2)}% - ${riskLevel || "Pending"}`}
+                      color={riskColor(riskLevel)}
                     />
-                  ) : "Not Predicted"}
+                  ) : hasCompleteAcademic(s) ? "Not Predicted" : "Incomplete Data"}
                 </TableCell>
 
                 <TableCell>
                   <Box display="flex" gap={1}>
-                    <Button variant="contained" size="small" onClick={() => handlePredictClick(s)}>
-                      Predict
-                    </Button>
                     <Button
-                      variant="outlined"
-                      color="error"
+                      variant="contained"
                       size="small"
-                      onClick={() => onDelete(s.id)}
+                      onClick={() => runPrediction(s.id)}
+                      disabled={predictingId === s.id || !hasCompleteAcademic(s)}
                     >
-                      Delete
+                      {predictingId === s.id ? "Predicting..." : "Predict"}
                     </Button>
                   </Box>
                 </TableCell>
 
               </TableRow>
-            ))}
+            )})}
           </TableBody>
         </Table>
       </TableContainer>
-
-      {/* Prediction Dialog */}
-      <Dialog open={openPredict} onClose={() => setOpenPredict(false)}>
-        <DialogTitle>AI Prediction</DialogTitle>
-        <DialogContent>
-          {Object.keys(formData).map(k => (
-            <TextField
-              key={k}
-              name={k}
-              label={k}
-              value={formData[k]}
-              onChange={handleChange}
-              type="number"
-              fullWidth
-              sx={{ mt:1 }}
-            />
-          ))}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenPredict(false)}>Cancel</Button>
-          <Button onClick={runPrediction} variant="contained">
-            {predicting ? "Predicting..." : "Predict"}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
     </Box>
   );
 };

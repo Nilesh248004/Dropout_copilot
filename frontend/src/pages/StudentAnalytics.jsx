@@ -2,28 +2,99 @@ import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 import {
-  Container, Typography, Box, Paper, Grid, Chip, Button
+  Container, Typography, Paper, Grid, Chip, Button, Alert
 } from "@mui/material";
 import RiskCharts from "../components/RiskChart";
+import { API_BASE_URL } from "../config/api";
+import { useRole } from "../context/RoleContext";
+import { normalizeFacultyId } from "../utils/faculty";
+import { getRiskScore } from "../utils/risk";
 
 const StudentAnalytics = () => {
   const { id } = useParams();
+  const { role, facultyId } = useRole();
   const [student, setStudent] = useState(null);
-
-  const fetchStudent = async () => {
-    const res = await axios.get(`http://localhost:4000/students/${id}/full`);
-    setStudent(res.data);
-  };
+  const [accessDenied, setAccessDenied] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let active = true;
+    const fetchStudent = async () => {
+      try {
+        setLoading(true);
+        setAccessDenied(false);
+        const params =
+          role === "faculty" && facultyId ? { faculty_id: facultyId } : undefined;
+        const res = await axios.get(`${API_BASE_URL}/students/${id}/full`, { params });
+        const data = res.data;
+        if (role === "faculty" && facultyId) {
+          const normalizedFaculty = normalizeFacultyId(facultyId);
+          if (normalizeFacultyId(data?.faculty_id) !== normalizedFaculty) {
+            if (active) {
+              setStudent(null);
+              setAccessDenied(true);
+            }
+            return;
+          }
+        }
+        if (active) {
+          setStudent(data);
+        }
+      } catch (error) {
+        if (active) {
+          if (role === "faculty") {
+            setAccessDenied(true);
+          }
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    };
+
     fetchStudent();
-  }, []);
+    return () => {
+      active = false;
+    };
+  }, [id, role, facultyId]);
 
-  if (!student) return <div>Loading...</div>;
+  if (loading) return <div>Loading...</div>;
+  if (accessDenied) {
+    return (
+      <Container sx={{ mt: 4 }}>
+        <Alert severity="error">
+          You do not have access to this student's analytics.
+        </Alert>
+      </Container>
+    );
+  }
+  if (!student) {
+    return (
+      <Container sx={{ mt: 4 }}>
+        <Alert severity="warning">Student record not found.</Alert>
+      </Container>
+    );
+  }
 
+  const riskScore = getRiskScore(student);
   const riskColor =
-    student.dropout_risk > 0.7 ? "error" :
-    student.dropout_risk > 0.4 ? "warning" : "success";
+    riskScore === null ? "default" :
+    riskScore > 0.7 ? "error" :
+    riskScore > 0.4 ? "warning" : "success";
+
+  const handleBookCounselling = async () => {
+    const mappedFacultyId = role === "faculty" ? facultyId : student.faculty_id;
+    if (!mappedFacultyId) {
+      alert("Faculty ID is required to book counselling.");
+      return;
+    }
+    await axios.post(`${API_BASE_URL}/counselling/book`, {
+      student_id: id,
+      faculty_id: mappedFacultyId,
+    });
+    alert("Counselling session requested.");
+  };
 
   return (
     <Container sx={{ mt: 4 }}>
@@ -46,7 +117,7 @@ const StudentAnalytics = () => {
       <Paper sx={{ p: 2, mb: 3 }}>
         <Typography variant="h6">Dropout Risk Score</Typography>
         <Chip
-          label={`${(student.dropout_risk * 100).toFixed(2)}%`}
+          label={riskScore === null ? "Pending" : `${(riskScore * 100).toFixed(2)}%`}
           color={riskColor}
           sx={{ fontSize: 20, p: 2 }}
         />
@@ -62,7 +133,7 @@ const StudentAnalytics = () => {
       <Paper sx={{ p: 2, bgcolor: "#f9f9f9" }}>
         <Typography variant="h6">🧠 Counselling Recommendation</Typography>
         <Typography>
-          {student.dropout_risk > 0.6
+          {riskScore !== null && riskScore > 0.6
             ? "High risk detected. Counselling strongly recommended."
             : "Student is performing normally."}
         </Typography>
@@ -71,7 +142,7 @@ const StudentAnalytics = () => {
           variant="contained"
           color="primary"
           sx={{ mt: 2 }}
-          onClick={() => axios.post("http://localhost:4000/counselling/book", { student_id: id })}
+          onClick={handleBookCounselling}
         >
           Book Counselling Session
         </Button>

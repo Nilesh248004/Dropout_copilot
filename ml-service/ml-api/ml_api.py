@@ -5,6 +5,7 @@ import joblib
 import numpy as np
 from pathlib import Path
 import os
+import json
 
 # ============================
 # Paths (SAFE FOR WINDOWS)
@@ -15,6 +16,7 @@ MODELS_DIR = BASE_DIR.parent / "models"
 
 MODEL_PATH = MODELS_DIR / "model.pkl"
 SCALER_PATH = MODELS_DIR / "scaler.pkl"
+METRICS_PATH = MODELS_DIR / "model_metrics.json"
 
 print("BASE_DIR:", BASE_DIR)
 print("MODEL_PATH:", MODEL_PATH)
@@ -41,6 +43,24 @@ scaler = joblib.load(SCALER_PATH)
 print("✅ Model Type:", type(model))
 print("✅ Scaler Type:", type(scaler))
 print("✅ Scaler Feature Count:", scaler.n_features_in_)
+
+# ============================
+# Risk thresholds (optional)
+# ============================
+risk_thresholds = {"low": 0.4, "high": 0.7}
+if METRICS_PATH.exists():
+    try:
+        with open(METRICS_PATH, "r", encoding="utf-8") as f:
+            metrics = json.load(f)
+        thresholds = metrics.get("risk_thresholds")
+        if thresholds and "low" in thresholds and "high" in thresholds:
+            risk_thresholds = {
+                "low": float(thresholds["low"]),
+                "high": float(thresholds["high"]),
+            }
+            print("✅ Loaded risk thresholds:", risk_thresholds)
+    except Exception as e:
+        print("⚠️ Failed to load thresholds:", e)
 
 # ============================
 # FastAPI App
@@ -131,18 +151,28 @@ def predict(student: StudentData):
         prob = float(model.predict_proba(x_scaled)[0][1])
 
         # ----------------------------
+        # Adjusted Risk Score (rules)
+        # ----------------------------
+        adjusted_prob = prob
+        if student.arrear_count > 2:
+            # enforce higher risk score when arrears are high
+            adjusted_prob = max(adjusted_prob, 0.85)
+
+        # ----------------------------
         # Risk Level Logic
         # ----------------------------
-        if prob > 0.6:
+        if student.arrear_count > 2:
             risk_level = "HIGH"
-        elif prob > 0.01:
+        elif adjusted_prob >= risk_thresholds["high"]:
+            risk_level = "HIGH"
+        elif adjusted_prob >= risk_thresholds["low"]:
             risk_level = "MEDIUM"
         else:
             risk_level = "LOW"
 
         return {
             "dropout_prediction": pred,
-            "risk_score": round(prob, 4),
+            "risk_score": round(adjusted_prob, 4),
             "risk_level": risk_level
         }
 

@@ -1,15 +1,18 @@
 import React from "react";
 import { Box, Typography, Paper, Chip, Button, TextField } from "@mui/material";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { getRiskLevel, getRiskScore } from "../utils/risk";
 
 const StudentProfileDialog = ({ student }) => {
 
-  const riskColor = student.risk_score > 0.7 ? "error" : student.risk_score > 0.4 ? "warning" : "success";
+  const riskScore = getRiskScore(student);
+  const riskLevel = getRiskLevel(student);
+  const riskColor = riskScore === null ? "default" : riskScore > 0.7 ? "error" : riskScore > 0.4 ? "warning" : "success";
 
   const graphData = [
     { name: "Attendance", value: student.attendance || 0 },
     { name: "CGPA", value: student.cgpa || 0 },
-    { name: "Risk %", value: (student.risk_score || 0) * 100 },
+    { name: "Risk %", value: (riskScore || 0) * 100 },
   ];
 
   return (
@@ -25,7 +28,11 @@ const StudentProfileDialog = ({ student }) => {
         <Typography>CGPA: {student.cgpa}</Typography>
 
         <Chip
-          label={`Risk Score: ${(student.risk_score * 100).toFixed(2)}% (${student.risk_level})`}
+          label={
+            riskScore === null
+              ? "Risk Score: Pending"
+              : `Risk Score: ${(riskScore * 100).toFixed(2)}% (${riskLevel || "Pending"})`
+          }
           color={riskColor}
           sx={{ mt: 1 }}
         />
@@ -49,7 +56,7 @@ const StudentProfileDialog = ({ student }) => {
         <Typography variant="h6">🧠 Counselling Request</Typography>
 
         <Typography>
-          Student Risk Level: <b>{student.risk_level}</b>
+          Student Risk Level: <b>{riskLevel || "Pending"}</b>
         </Typography>
 
         <TextField

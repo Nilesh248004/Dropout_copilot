@@ -1,12 +1,20 @@
 import React from "react";
 import { Button } from "@mui/material";
 import { batchPredictAll } from "../api/studentApi";
+import { useRole } from "../context/RoleContext";
 
 const BatchPredictButton = ({ reload }) => {
+  const { role, facultyId } = useRole();
+
   const handleBatchPredict = async () => {
-    alert("Starting AI prediction for all students...");
-    await batchPredictAll();
-    alert("Prediction completed for all students!");
+    if (role === "faculty" && !facultyId) {
+      alert("Please sign in with your Faculty ID before predicting.");
+      return;
+    }
+    const targetLabel = role === "faculty" ? "your students" : "all students";
+    alert(`Starting AI prediction for ${targetLabel}...`);
+    await batchPredictAll(role === "faculty" ? facultyId : undefined);
+    alert(`Prediction completed for ${targetLabel}!`);
     reload();
   };
 

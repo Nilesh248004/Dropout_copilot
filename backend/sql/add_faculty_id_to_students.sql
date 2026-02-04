@@ -1,0 +1,2 @@
+ALTER TABLE students
+ADD COLUMN IF NOT EXISTS faculty_id TEXT;

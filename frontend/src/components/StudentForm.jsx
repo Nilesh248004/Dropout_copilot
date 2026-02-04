@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { TextField, Button, Box, Typography } from "@mui/material";
 import axios from "axios";
+import { API_BASE_URL } from "../config/api";
 
 const StudentForm = ({ student, onClose, refresh }) => {
   // Form state
@@ -54,14 +55,14 @@ const StudentForm = ({ student, onClose, refresh }) => {
 
       if (student) {
         // UPDATE existing student
-        await axios.put(`http://localhost:4000/students/${student.id}`, formData);
+        await axios.put(`${API_BASE_URL}/students/${student.id}`, formData);
       } else {
         // ADD new student
-        const res = await axios.post("http://localhost:4000/students", formData);
+        const res = await axios.post(`${API_BASE_URL}/students`, formData);
 
         // Optionally, create a blank academic record
         if (res.data.id) {
-          await axios.post("http://localhost:4000/academic", {
+          await axios.post(`${API_BASE_URL}/academic`, {
             student_id: res.data.id,
             attendance: null,
             cgpa: null,

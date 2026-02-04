@@ -1,0 +1,2 @@
+ALTER TABLE counselling_requests
+ADD COLUMN IF NOT EXISTS request_date TIMESTAMP DEFAULT NOW();
