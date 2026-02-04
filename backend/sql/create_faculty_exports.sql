@@ -5,7 +5,10 @@ CREATE TABLE IF NOT EXISTS faculty_exports (
   file_name TEXT NOT NULL,
   file_size INTEGER,
   row_count INTEGER,
-  content TEXT NOT NULL,
+  content TEXT,
+  content_preview TEXT,
+  object_key TEXT,
+  storage_provider TEXT,
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 

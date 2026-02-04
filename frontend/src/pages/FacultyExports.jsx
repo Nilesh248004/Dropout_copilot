@@ -108,7 +108,8 @@ const FacultyExports = () => {
     try {
       setPreviewLoadingId(exportItem.id);
       const res = await axios.get(`${API_BASE_URL}/exports/${exportItem.id}`);
-      setPreview(buildPreview(res.data.content));
+      const previewText = res.data?.content_preview || res.data?.content || "";
+      setPreview(buildPreview(previewText));
       setPreviewMeta(res.data);
     } catch (err) {
       setStatus({
@@ -123,7 +124,17 @@ const FacultyExports = () => {
   const handleDownload = async (exportItem) => {
     try {
       setDownloadingId(exportItem.id);
-      const res = await axios.get(`${API_BASE_URL}/exports/${exportItem.id}`);
+      const res = await axios.get(`${API_BASE_URL}/exports/${exportItem.id}/download`);
+      if (res.data?.download_url) {
+        const link = document.createElement("a");
+        link.href = res.data.download_url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        return;
+      }
       const content = res.data?.content || exportItem.content_preview || "";
       const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);

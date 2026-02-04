@@ -1,8 +1,35 @@
 const router = require("express").Router();
 const pool = require("../db");
+const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const normalizeFacultyId = (value) => (value || "").trim().toLowerCase();
 const normalizeEmail = (value) => (value || "").trim().toLowerCase();
+
+const useB2 = Boolean(
+  process.env.B2_BUCKET_NAME &&
+    process.env.B2_KEY_ID &&
+    process.env.B2_APPLICATION_KEY &&
+    process.env.B2_S3_ENDPOINT
+);
+
+const ensureHttps = (value) => {
+  if (!value) return value;
+  if (value.startsWith("http://") || value.startsWith("https://")) return value;
+  return `https://${value}`;
+};
+
+const b2Client = useB2
+  ? new S3Client({
+      region: process.env.B2_REGION || "us-east-005",
+      endpoint: ensureHttps(process.env.B2_S3_ENDPOINT),
+      credentials: {
+        accessKeyId: process.env.B2_KEY_ID,
+        secretAccessKey: process.env.B2_APPLICATION_KEY,
+      },
+      forcePathStyle: true,
+    })
+  : null;
 
 const countDataRows = (content) => {
   if (!content) return 0;
@@ -12,6 +39,26 @@ const countDataRows = (content) => {
     .filter(Boolean);
   if (lines.length <= 1) return 0;
   return lines.length - 1;
+};
+
+const buildObjectKey = (facultyId, fileName) => {
+  const safeName = String(fileName || "export.csv")
+    .trim()
+    .replace(/[^\w.-]+/g, "_");
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `exports/${facultyId}/${timestamp}_${safeName}`;
+};
+
+const buildSignedDownloadUrl = async (objectKey, fileName) => {
+  if (!b2Client || !objectKey) return null;
+  const expiresIn = Number(process.env.B2_SIGNED_URL_TTL || 600);
+  const command = new GetObjectCommand({
+    Bucket: process.env.B2_BUCKET_NAME,
+    Key: objectKey,
+    ResponseContentDisposition: `attachment; filename="${fileName || "faculty-export.csv"}"`,
+    ResponseContentType: "text/csv",
+  });
+  return getSignedUrl(b2Client, command, { expiresIn });
 };
 
 router.post("/", async (req, res) => {
@@ -27,6 +74,23 @@ router.post("/", async (req, res) => {
     }
 
     const rowCount = countDataRows(content);
+    const contentPreview = String(content).slice(0, 20000);
+    let objectKey = null;
+    let storageProvider = null;
+    let storedContent = content;
+
+    if (useB2) {
+      objectKey = buildObjectKey(normalizedFacultyId, file_name);
+      const command = new PutObjectCommand({
+        Bucket: process.env.B2_BUCKET_NAME,
+        Key: objectKey,
+        Body: content,
+        ContentType: "text/csv",
+      });
+      await b2Client.send(command);
+      storageProvider = "b2";
+      storedContent = null;
+    }
 
     const result = await pool.query(
       `
@@ -36,9 +100,12 @@ router.post("/", async (req, res) => {
         file_name,
         file_size,
         row_count,
-        content
+        content,
+        content_preview,
+        object_key,
+        storage_provider
       )
-      VALUES ($1, $2, $3, $4, $5, $6)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING id, created_at
       `,
       [
@@ -47,7 +114,10 @@ router.post("/", async (req, res) => {
         file_name,
         Number.isFinite(Number(file_size)) ? Number(file_size) : null,
         rowCount,
-        content,
+        storedContent,
+        contentPreview,
+        objectKey,
+        storageProvider,
       ]
     );
 
@@ -78,7 +148,9 @@ router.get("/", async (req, res) => {
              file_size,
              row_count,
              created_at,
-             LEFT(content, 20000) AS content_preview
+             COALESCE(content_preview, LEFT(content, 20000)) AS content_preview,
+             object_key,
+             storage_provider
       FROM faculty_exports
       ${whereClause}
       ORDER BY created_at DESC
@@ -97,7 +169,17 @@ router.get("/:id", async (req, res) => {
     const id = Number(req.params.id);
     const result = await pool.query(
       `
-      SELECT id, faculty_id, uploaded_by_email, file_name, file_size, row_count, created_at, content
+      SELECT id,
+             faculty_id,
+             uploaded_by_email,
+             file_name,
+             file_size,
+             row_count,
+             created_at,
+             content,
+             COALESCE(content_preview, LEFT(content, 20000)) AS content_preview,
+             object_key,
+             storage_provider
       FROM faculty_exports
       WHERE id = $1
       `,
@@ -106,10 +188,43 @@ router.get("/:id", async (req, res) => {
     if (!result.rows.length) {
       return res.status(404).json({ error: "Export not found." });
     }
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    if (useB2 && row.storage_provider === "b2" && row.object_key) {
+      row.download_url = await buildSignedDownloadUrl(row.object_key, row.file_name);
+    }
+    res.json(row);
   } catch (err) {
     console.error("EXPORT FETCH ERROR:", err);
     res.status(500).json({ error: "Unable to load export." });
+  }
+});
+
+router.get("/:id/download", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const result = await pool.query(
+      `
+      SELECT id, file_name, content, object_key, storage_provider
+      FROM faculty_exports
+      WHERE id = $1
+      `,
+      [id]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Export not found." });
+    }
+    const row = result.rows[0];
+    if (useB2 && row.storage_provider === "b2" && row.object_key) {
+      const downloadUrl = await buildSignedDownloadUrl(row.object_key, row.file_name);
+      return res.json({ download_url: downloadUrl });
+    }
+    return res.json({
+      content: row.content || "",
+      file_name: row.file_name,
+    });
+  } catch (err) {
+    console.error("EXPORT DOWNLOAD ERROR:", err);
+    res.status(500).json({ error: "Unable to download export." });
   }
 });
 
