@@ -1,0 +1,44 @@
+/* Global styles */
+body {
+  margin: 0;
+  font-family: 'Roboto', sans-serif;
+  background-color: #f5f7fa;
+  color: #333;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 500;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  padding: 16px;
+  margin: 12px 0;
+}
+
+.container {
+  width: 95%;
+  max-width: 1200px;
+  margin: auto;
+  padding: 20px 0;
+}
+
+.MuiTableCell-root {
+  font-size: 14px !important;
+}
+
+.MuiTableHead-root .MuiTableCell-root {
+  background-color: #1976d2 !important;
+  color: white !important;
+}
