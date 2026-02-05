@@ -10,7 +10,7 @@ import {
   Alert,
 } from "@mui/material";
 import axios from "axios";
-import { API_BASE_URL, ML_BASE_URL } from "../config/api";
+import { API_BASE_URL } from "../config/api";
 import { useNavigate } from "react-router-dom";
 
 const AddStudent = () => {
@@ -60,33 +60,16 @@ const AddStudent = () => {
         throw new Error("Failed to add student");
       }
 
-      // 2️⃣ Call ML API to get risk prediction
-      const mlResponse = await axios.post(
-        `${ML_BASE_URL}/predict`,
-        {
-          attendance: Number(formData.attendance),
-          cgpa: Number(formData.cgpa),
-          arrear_count: Number(formData.arrear_count),
-          fees_paid: Number(formData.fees_paid),
-          disciplinary_issues: Number(formData.disciplinary_issues),
-          year: Number(formData.year),
-          semester: Number(formData.semester),
-        },
-        { headers: { "Content-Type": "application/json" } }
-      );
-
       setLoading(false);
 
-      // 3️⃣ Show success Snackbar with risk level
+      // 2️⃣ Show success Snackbar (prediction happens only on user action)
       setSnackbar({
         open: true,
-        message: `Student added! Risk Level: ${mlResponse.data.risk_level}`,
+        message: "Student added successfully.",
         severity: "success",
       });
 
-      console.log("ML Prediction:", mlResponse.data);
-
-      // 4️⃣ Redirect to dashboard after short delay
+      // 3️⃣ Redirect to dashboard after short delay
       setTimeout(() => navigate("/dashboard"), 1500);
 
     } catch (error) {

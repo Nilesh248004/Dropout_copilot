@@ -58,8 +58,18 @@ const StudentTable = ({ refresh }) => {
 
   const handleDelete = async (id) => {
     if (!window.confirm("Delete student permanently?")) return;
-    await axios.delete(`${API_BASE_URL}/students/${id}`);
-    fetchStudents();
+    try {
+      await axios.delete(`${API_BASE_URL}/students/${id}`);
+      fetchStudents();
+    } catch (err) {
+      console.error("Delete student error:", err);
+      const message =
+        err.response?.data?.error ||
+        err.response?.data?.message ||
+        err.message ||
+        "Unable to delete student.";
+      alert(message);
+    }
   };
 
   const handleEdit = (id) => navigate(`/students/edit/${id}`);

@@ -1,5 +1,7 @@
 export const getRiskScore = (student) => {
-  const score = student?.risk_score ?? student?.dropout_risk;
+  const raw = student?.risk_score ?? student?.dropout_risk;
+  if (raw === null || raw === undefined || raw === "") return null;
+  const score = Number(raw);
   return Number.isFinite(score) ? score : null;
 };
 

@@ -28,7 +28,10 @@ router.post("/", async (req, res) => {
       VALUES ($1,$2,$3,$4) RETURNING id
     `, [name, register_number, year, semester]);
 
-    await pool.query("INSERT INTO academic_records(student_id) VALUES($1)", [result.rows[0].id]);
+    await pool.query(
+      "INSERT INTO academic_records(student_id, dropout_risk, dropout_flag) VALUES($1, NULL, NULL)",
+      [result.rows[0].id]
+    );
     res.status(201).json({ studentId: result.rows[0].id });
   } catch (err) {
     console.error("ADD STUDENT ERROR:", err.message);
@@ -38,15 +41,26 @@ router.post("/", async (req, res) => {
 
 // DELETE student
 router.delete("/:id", async (req, res) => {
+  const client = await pool.connect();
   try {
-    const id = req.params.id;
-    await pool.query("DELETE FROM predictions WHERE student_id=$1", [id]);
-    await pool.query("DELETE FROM academic_records WHERE student_id=$1", [id]);
-    await pool.query("DELETE FROM students WHERE id=$1", [id]);
+    const id = Number(req.params.id);
+    await client.query("BEGIN");
+    await client.query("DELETE FROM counselling_requests WHERE student_id=$1", [id]);
+    await client.query("DELETE FROM student_alerts WHERE student_id=$1", [id]);
+    await client.query("DELETE FROM faculty_alerts WHERE student_id=$1", [id]);
+    await client.query("DELETE FROM prediction_history WHERE student_id=$1", [id]);
+    await client.query("DELETE FROM predictions WHERE student_id=$1", [id]);
+    await client.query("DELETE FROM academic_records WHERE student_id=$1", [id]);
+    await client.query("DELETE FROM app_users WHERE student_id=$1", [id]);
+    await client.query("DELETE FROM students WHERE id=$1", [id]);
+    await client.query("COMMIT");
     res.json({ message: "Student deleted successfully" });
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error("DELETE STUDENT ERROR:", err.message);
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 

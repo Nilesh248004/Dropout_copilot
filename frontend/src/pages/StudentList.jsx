@@ -18,7 +18,7 @@ import {
 import { API_BASE_URL } from "../config/api";
 import { useRole } from "../context/RoleContext";
 import { filterStudentsByFaculty } from "../utils/faculty";
-import { getRiskLevel, getRiskScore } from "../utils/risk";
+import { getRiskScore } from "../utils/risk";
 
 const StudentList = ({ students: propStudents, reload }) => {
   const { role, facultyId } = useRole();
@@ -91,17 +91,17 @@ const StudentList = ({ students: propStudents, reload }) => {
   };
 
   // ================= CHIP COLOR ==================
-  const riskColor = (level) => {
-    switch (level?.toUpperCase()) {
-      case "HIGH":
-        return "error";
-      case "MEDIUM":
-        return "warning";
-      case "LOW":
-        return "success";
-      default:
-        return "default";
+  const riskColor = (level, score) => {
+    const normalized = level?.toUpperCase();
+    if (normalized === "HIGH") return "error";
+    if (normalized === "MEDIUM") return "warning";
+    if (normalized === "LOW") return "success";
+    if (Number.isFinite(score)) {
+      if (score > 0.7) return "error";
+      if (score > 0.4) return "warning";
+      return "success";
     }
+    return "default";
   };
 
   const hasCompleteAcademic = (s) =>
@@ -152,7 +152,13 @@ const StudentList = ({ students: propStudents, reload }) => {
           <TableBody>
             {students.map((s) => {
               const riskScore = getRiskScore(s);
-              const riskLevel = getRiskLevel(s);
+              const riskLevelRaw = s?.risk_level ?? null;
+              const riskLevelNormalized =
+                typeof riskLevelRaw === "string" ? riskLevelRaw.toUpperCase() : null;
+              const hasPrediction =
+                riskLevelNormalized !== null &&
+                ["HIGH", "MEDIUM", "LOW"].includes(riskLevelNormalized);
+              const isPredicting = predictingId === s.id;
               return (
               <TableRow key={s.id}>
               <TableCell>{s.name}</TableCell>
@@ -168,10 +174,10 @@ const StudentList = ({ students: propStudents, reload }) => {
 
                 {/* ✅ SHOW PREDICTION SCORE */}
                 <TableCell>
-                  {riskScore !== null ? (
+                  {hasPrediction && riskScore !== null ? (
                     <Chip
-                      label={`${(riskScore * 100).toFixed(2)}% - ${riskLevel || "Pending"}`}
-                      color={riskColor(riskLevel)}
+                      label={`${(riskScore * 100).toFixed(2)}% - ${riskLevelNormalized || "Pending"}`}
+                      color={riskColor(riskLevelNormalized, riskScore)}
                     />
                   ) : hasCompleteAcademic(s) ? "Not Predicted" : "Incomplete Data"}
                 </TableCell>
@@ -182,9 +188,10 @@ const StudentList = ({ students: propStudents, reload }) => {
                       variant="contained"
                       size="small"
                       onClick={() => runPrediction(s.id)}
-                      disabled={predictingId === s.id || !hasCompleteAcademic(s)}
+                      disabled={isPredicting || !hasCompleteAcademic(s)}
+                      color={hasPrediction ? "success" : "primary"}
                     >
-                      {predictingId === s.id ? "Predicting..." : "Predict"}
+                      {isPredicting ? "Predicting..." : hasPrediction ? "Predicted" : "Predict"}
                     </Button>
                   </Box>
                 </TableCell>
