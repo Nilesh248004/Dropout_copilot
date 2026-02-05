@@ -24,7 +24,15 @@ import { API_BASE_URL } from "../config/api";
 const GOOGLE_CLIENT_ID =
   process.env.REACT_APP_GOOGLE_CLIENT_ID ||
   "877119541780-lhrkbjv2kfb7ev8kmb1innnu7coifbs8.apps.googleusercontent.com";
-const PRIMARY_ORIGIN = process.env.REACT_APP_PRIMARY_ORIGIN || "http://localhost:3000";
+const PRIMARY_ORIGINS = (
+  process.env.REACT_APP_PRIMARY_ORIGINS ||
+  process.env.REACT_APP_PRIMARY_ORIGIN ||
+  "http://localhost:3000"
+)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const PRIMARY_ORIGIN = PRIMARY_ORIGINS[0] || "http://localhost:3000";
 const LoginPage = () => {
   const navigate = useNavigate();
   const { role, setRole, email, setEmail, facultyId, setFacultyId, studentId, setStudentId } = useRole();
@@ -219,13 +227,14 @@ const LoginPage = () => {
   };
 
   const currentOrigin = typeof window !== "undefined" ? window.location.origin : "";
-  const originMismatch = currentOrigin && currentOrigin !== PRIMARY_ORIGIN;
+  const originMismatch =
+    currentOrigin && !PRIMARY_ORIGINS.includes(currentOrigin);
 
   const copyDiagnostics = async () => {
     try {
       const payload = [
         `origin=${currentOrigin}`,
-        `primary_origin=${PRIMARY_ORIGIN}`,
+        `primary_origins=${PRIMARY_ORIGINS.join(",")}`,
         `client_id=${GOOGLE_CLIENT_ID}`,
         `google_loaded=${Boolean(window.google?.accounts?.id)}`,
       ].join("\n");
@@ -601,7 +610,7 @@ const LoginPage = () => {
                   Current: <b>{currentOrigin || "unknown"}</b>
                 </Typography>
                 <Typography variant="body2">
-                  Recommended: <b>{PRIMARY_ORIGIN}</b>
+                  Allowed: <b>{PRIMARY_ORIGINS.join(", ")}</b>
                 </Typography>
                 <Stack direction="row" spacing={1} mt={1}>
                   {originMismatch && (
@@ -612,7 +621,7 @@ const LoginPage = () => {
                         window.location.href = `${PRIMARY_ORIGIN}${window.location.pathname}`;
                       }}
                     >
-                      Switch to Recommended URL
+                      Switch to Allowed URL
                     </Button>
                   )}
                   <Button size="small" variant="text" onClick={copyDiagnostics}>
