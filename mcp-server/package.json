@@ -1,0 +1,22 @@
+{
+  "name": "dropout-copilot-mcp-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "dotenv": "^17.2.4",
+    "express": "^5.2.1",
+    "openai": "^6.18.0",
+    "pg": "^8.18.0",
+    "zod": "^3.25.76"
+  },
+  "description": "",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

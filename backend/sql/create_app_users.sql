@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS app_users (
   auth_provider TEXT NOT NULL DEFAULT 'local',
   faculty_id TEXT,
   student_id TEXT,
+  phone_number TEXT,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
   CONSTRAINT app_users_role_id_check CHECK (

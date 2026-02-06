@@ -3,8 +3,10 @@ import { AppBar, Toolbar, Typography, Button, Box, Chip } from "@mui/material";
 import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 import { useRole } from "../context/RoleContext";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
+import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
+import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 
-const Navbar = () => {
+const Navbar = ({ themeMode, onToggleTheme }) => {
   const { role } = useRole();
   const navigate = useNavigate();
   const location = useLocation();
@@ -13,6 +15,7 @@ const Navbar = () => {
   const isFaculty = role === "faculty";
   const isAdmin = role === "admin";
   const isActive = (path) => location.pathname === path;
+  const isReportActive = isStudent && location.pathname === "/student/report";
 
   const handleLogout = () => {
     navigate("/login");
@@ -67,6 +70,24 @@ const Navbar = () => {
               border: "1px solid rgba(56,189,248,0.4)",
             }}
           />
+          <Button
+            color="inherit"
+            onClick={onToggleTheme}
+            startIcon={
+              themeMode === "dark" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />
+            }
+            sx={{
+              textTransform: "none",
+              fontWeight: 600,
+              borderRadius: 999,
+              px: 2,
+              border: "1px solid rgba(148,163,184,0.4)",
+              color: "#e2e8f0",
+              "&:hover": { background: "rgba(148,163,184,0.18)" },
+            }}
+          >
+            {themeMode === "dark" ? "Light Mode" : "Dark Mode"}
+          </Button>
         </Box>
         <Box sx={{ ml: 3, display: "flex", gap: 1 }}>
           {isStudent ? (
@@ -94,13 +115,18 @@ const Navbar = () => {
               <Button
                 color="inherit"
                 component={RouterLink}
-                to="/dashboard/student"
+                to="/student/report"
                 sx={{
                   textTransform: "none",
                   fontWeight: 600,
                   borderRadius: 999,
                   px: 2,
-                  border: "1px solid transparent",
+                  border: isReportActive
+                    ? "1px solid rgba(56,189,248,0.6)"
+                    : "1px solid transparent",
+                  background: isReportActive
+                    ? "rgba(56,189,248,0.16)"
+                    : "transparent",
                   "&:hover": { background: "rgba(148,163,184,0.18)" },
                 }}
               >

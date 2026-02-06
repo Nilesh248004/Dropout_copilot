@@ -5,12 +5,17 @@ import {
   Button,
   Chip,
   Divider,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Link,
   Paper,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
+import { alpha, useTheme } from "@mui/material/styles";
 import GoogleIcon from "@mui/icons-material/Google";
 import SchoolRoundedIcon from "@mui/icons-material/SchoolRounded";
 import GroupsRoundedIcon from "@mui/icons-material/GroupsRounded";
@@ -34,6 +39,19 @@ const PRIMARY_ORIGINS = (
   .filter(Boolean);
 const PRIMARY_ORIGIN = PRIMARY_ORIGINS[0] || "http://localhost:3000";
 const LoginPage = () => {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === "dark";
+  const palette = theme.palette;
+  const primaryMain = palette.primary.main;
+  const primaryLight = palette.primary.light || palette.primary.main;
+  const textPrimary = palette.text.primary;
+  const textSecondary = palette.text.secondary;
+  const surface = palette.background.paper;
+  const borderSoft = alpha(textPrimary, isDark ? 0.18 : 0.12);
+  const borderStrong = alpha(textPrimary, isDark ? 0.28 : 0.18);
+  const panelBg = alpha(surface, isDark ? 0.92 : 0.98);
+  const fieldBg = alpha(surface, isDark ? 0.5 : 0.9);
+  const primaryGradient = `linear-gradient(135deg, ${primaryMain} 0%, ${primaryLight} 100%)`;
   const navigate = useNavigate();
   const { role, setRole, email, setEmail, facultyId, setFacultyId, studentId, setStudentId } = useRole();
   const [mode, setMode] = useState("signin");
@@ -64,6 +82,17 @@ const LoginPage = () => {
     name: "",
     email: "",
     password: "",
+    confirmPassword: "",
+    phone: "",
+  });
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetStep, setResetStep] = useState("request");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetStatus, setResetStatus] = useState(null);
+  const [resetForm, setResetForm] = useState({
+    email: "",
+    code: "",
+    newPassword: "",
     confirmPassword: "",
   });
 
@@ -97,6 +126,8 @@ const LoginPage = () => {
     setPendingEmail("");
     setPendingPassword("");
     setPendingGoogleToken("");
+    setResetOpen(false);
+    setResetStatus(null);
     facultyIdTouchedRef.current = false;
     studentIdTouchedRef.current = false;
   };
@@ -118,6 +149,97 @@ const LoginPage = () => {
     setLinkError("");
     studentIdTouchedRef.current = true;
     setStudentIdInput(event.target.value);
+  };
+
+  const handleResetChange = (event) => {
+    setResetStatus(null);
+    setResetForm((prev) => ({ ...prev, [event.target.name]: event.target.value }));
+  };
+
+  const openResetDialog = () => {
+    setResetStatus(null);
+    setResetStep("request");
+    setResetForm((prev) => ({
+      ...prev,
+      email: formData.email || "",
+      code: "",
+      newPassword: "",
+      confirmPassword: "",
+    }));
+    setResetOpen(true);
+  };
+
+  const closeResetDialog = () => {
+    setResetOpen(false);
+    setResetLoading(false);
+    setResetStatus(null);
+  };
+
+  const requestResetCode = async () => {
+    const email = normalizeEmail(resetForm.email);
+    if (!email) {
+      setResetStatus({ type: "error", message: "Please enter your email." });
+      return;
+    }
+    try {
+      setResetLoading(true);
+      await axios.post(`${API_BASE_URL}/auth/forgot-password`, {
+        email,
+        role: selectedRole,
+        delivery: "email",
+      });
+      setResetStep("verify");
+      setResetStatus({ type: "success", message: "Reset code sent to your email." });
+    } catch (err) {
+      setResetStatus({
+        type: "error",
+        message: err.response?.data?.error || "Unable to send reset code.",
+      });
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const submitResetPassword = async () => {
+    const email = normalizeEmail(resetForm.email);
+    if (!email) {
+      setResetStatus({ type: "error", message: "Please enter your email." });
+      return;
+    }
+    if (!resetForm.code) {
+      setResetStatus({ type: "error", message: "Enter the email code." });
+      return;
+    }
+    if (!resetForm.newPassword || resetForm.newPassword.length < 6) {
+      setResetStatus({
+        type: "error",
+        message: "Password must be at least 6 characters.",
+      });
+      return;
+    }
+    if (resetForm.newPassword !== resetForm.confirmPassword) {
+      setResetStatus({ type: "error", message: "Passwords do not match." });
+      return;
+    }
+    try {
+      setResetLoading(true);
+      await axios.post(`${API_BASE_URL}/auth/reset-password`, {
+        email,
+        role: selectedRole,
+        code: resetForm.code,
+        new_password: resetForm.newPassword,
+        delivery: "email",
+      });
+      setResetStatus({ type: "success", message: "Password updated. Please sign in." });
+      setResetOpen(false);
+    } catch (err) {
+      setResetStatus({
+        type: "error",
+        message: err.response?.data?.error || "Unable to reset password.",
+      });
+    } finally {
+      setResetLoading(false);
+    }
   };
 
   const goToDashboard = useCallback((targetRole, nextFacultyId = "", nextStudentId = "", nextEmail = "") => {
@@ -171,6 +293,7 @@ const LoginPage = () => {
           email,
           password: formData.password,
           role: selectedRole,
+          ...(formData.phone ? { phone_number: formData.phone } : {}),
           ...(selectedRole === "faculty" ? { faculty_id: facultyIdValue } : {}),
           ...(selectedRole === "student" ? { student_id: studentIdValue } : {}),
         });
@@ -434,8 +557,9 @@ const LoginPage = () => {
         alignItems: "center",
         justifyContent: "center",
         px: { xs: 2, md: 6 },
-        background:
-          "radial-gradient(circle at 12% 18%, rgba(56,189,248,0.28), transparent 48%), radial-gradient(circle at 80% 0%, rgba(59,130,246,0.36), transparent 42%), linear-gradient(140deg, #0b1224 0%, #0f172a 45%, #111827 100%)",
+        background: isDark
+          ? `radial-gradient(circle at 12% 18%, ${alpha(primaryLight, 0.3)}, transparent 48%), radial-gradient(circle at 80% 0%, ${alpha(primaryMain, 0.32)}, transparent 42%), linear-gradient(140deg, #0b1224 0%, #0f172a 45%, #111827 100%)`
+          : `radial-gradient(circle at 12% 18%, ${alpha(primaryLight, 0.2)}, transparent 52%), radial-gradient(circle at 80% 0%, ${alpha(primaryMain, 0.2)}, transparent 45%), linear-gradient(140deg, #f8fafc 0%, #e2e8f0 45%, #f1f5f9 100%)`,
         position: "relative",
         overflow: "hidden",
         fontFamily: '"Space Grotesk", "Manrope", sans-serif',
@@ -445,7 +569,7 @@ const LoginPage = () => {
           width: 420,
           height: 420,
           borderRadius: "50%",
-          background: "rgba(148,163,184,0.08)",
+          background: isDark ? alpha(textPrimary, 0.12) : alpha(primaryMain, 0.12),
           top: -140,
           right: -140,
         },
@@ -455,7 +579,7 @@ const LoginPage = () => {
           width: 280,
           height: 280,
           borderRadius: "50%",
-          background: "rgba(59,130,246,0.12)",
+          background: isDark ? alpha(primaryMain, 0.16) : alpha(primaryMain, 0.2),
           bottom: -120,
           left: -120,
         },
@@ -467,7 +591,7 @@ const LoginPage = () => {
           width: 220,
           height: 220,
           borderRadius: "50%",
-          background: "rgba(56,189,248,0.25)",
+          background: alpha(primaryMain, isDark ? 0.25 : 0.18),
           filter: "blur(12px)",
           top: { xs: 40, md: 60 },
           right: { xs: 40, md: 120 },
@@ -485,13 +609,13 @@ const LoginPage = () => {
           zIndex: 1,
         }}
       >
-        <Stack spacing={3} sx={{ color: "#e2e8f0", pr: { md: 4 } }}>
+        <Stack spacing={3} sx={{ color: textPrimary, pr: { md: 4 } }}>
           <Chip
             label="Dropout Copilot"
             sx={{
               alignSelf: "flex-start",
-              bgcolor: "rgba(59,130,246,0.2)",
-              color: "#bfdbfe",
+              bgcolor: alpha(primaryMain, isDark ? 0.2 : 0.12),
+              color: isDark ? primaryLight : primaryMain,
               fontWeight: 600,
               letterSpacing: 1.1,
             }}
@@ -499,7 +623,13 @@ const LoginPage = () => {
           <Typography variant="h3" sx={{ fontWeight: 700, lineHeight: 1.1 }}>
             Modern insights for every role in your campus.
           </Typography>
-          <Typography variant="body1" sx={{ color: "rgba(226,232,240,0.78)", maxWidth: 520 }}>
+          <Typography
+            variant="body1"
+            sx={{
+              color: textSecondary,
+              maxWidth: 520,
+            }}
+          >
             Dropout Copilot connects students, faculty, and admins with a shared view
             of risk analytics, engagement signals, and intervention workflows.
           </Typography>
@@ -515,7 +645,7 @@ const LoginPage = () => {
                   display: "flex",
                   alignItems: "center",
                   gap: 1.5,
-                  color: "rgba(226,232,240,0.9)",
+                  color: textPrimary,
                 }}
               >
                 <Box
@@ -523,7 +653,7 @@ const LoginPage = () => {
                     width: 10,
                     height: 10,
                     borderRadius: "50%",
-                    bgcolor: "#7dd3fc",
+                    bgcolor: primaryMain,
                   }}
                 />
                 <Typography variant="body2">{item}</Typography>
@@ -535,15 +665,18 @@ const LoginPage = () => {
               mt: 2,
               p: 2.5,
               borderRadius: 3,
-              background: "linear-gradient(145deg, rgba(15,23,42,0.85), rgba(30,41,59,0.7))",
-              border: "1px solid rgba(148,163,184,0.2)",
+              background: `linear-gradient(145deg, ${alpha(surface, isDark ? 0.95 : 0.98)}, ${alpha(surface, isDark ? 0.8 : 0.88)})`,
+              border: `1px solid ${borderSoft}`,
               maxWidth: 420,
             }}
           >
             <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
               Built for clarity at every level
             </Typography>
-            <Typography variant="body2" sx={{ color: "rgba(226,232,240,0.75)" }}>
+            <Typography
+              variant="body2"
+              sx={{ color: textSecondary }}
+            >
               Switch between student, faculty, and admin views instantly to experience
               the full flow without reloading.
             </Typography>
@@ -555,9 +688,9 @@ const LoginPage = () => {
           sx={{
             p: { xs: 3, sm: 4 },
             borderRadius: 4,
-            border: "1px solid rgba(148,163,184,0.25)",
-            background: "rgba(255,255,255,0.97)",
-            boxShadow: "0 30px 80px rgba(15,23,42,0.45)",
+            border: `1px solid ${borderSoft}`,
+            background: panelBg,
+            boxShadow: `0 30px 80px ${alpha(theme.palette.common.black, isDark ? 0.55 : 0.18)}`,
             animation: `${fadeUp} 0.6s ease-out`,
           }}
         >
@@ -582,13 +715,17 @@ const LoginPage = () => {
                   onClick={handleGoogleSignIn}
                   sx={{
                     mt: 1,
-                    borderColor: "rgba(15,23,42,0.2)",
-                    color: "#0f172a",
+                    borderColor: borderSoft,
+                    color: textPrimary,
                     textTransform: "none",
                     py: 1.1,
                     fontWeight: 600,
-                    bgcolor: "rgba(248,250,252,0.6)",
+                    bgcolor: alpha(surface, isDark ? 0.45 : 0.75),
                     width: "100%",
+                    "&:hover": {
+                      borderColor: borderStrong,
+                      bgcolor: alpha(surface, isDark ? 0.6 : 0.9),
+                    },
                   }}
                 >
                   {mode === "signup" ? "Sign up with Google" : "Sign in with Google"}
@@ -602,7 +739,14 @@ const LoginPage = () => {
             </Box>
 
             {(originMismatch || googleError) && (
-              <Alert severity="warning" sx={{ borderRadius: 2 }}>
+              <Alert
+                severity="warning"
+                sx={{
+                  borderRadius: 2,
+                  backgroundColor: alpha(theme.palette.warning.main, isDark ? 0.2 : 0.12),
+                  border: `1px solid ${alpha(theme.palette.warning.main, 0.35)}`,
+                }}
+              >
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   Google Sign-In needs an authorized origin.
                 </Typography>
@@ -631,7 +775,16 @@ const LoginPage = () => {
               </Alert>
             )}
 
-            <Divider>or</Divider>
+            <Divider
+              sx={{
+                color: textSecondary,
+                "&::before, &::after": {
+                  borderColor: borderSoft,
+                },
+              }}
+            >
+              or
+            </Divider>
 
             <Box component="form" onSubmit={handleSubmit}>
               <Stack spacing={2}>
@@ -642,6 +795,16 @@ const LoginPage = () => {
                     value={formData.name}
                     onChange={handleChange}
                     fullWidth
+                    sx={{
+                      "& .MuiOutlinedInput-root": {
+                        backgroundColor: fieldBg,
+                        borderRadius: 2.5,
+                        "& fieldset": { borderColor: borderSoft },
+                        "&:hover fieldset": { borderColor: alpha(primaryMain, 0.4) },
+                        "&.Mui-focused fieldset": { borderColor: primaryMain, borderWidth: 1.5 },
+                      },
+                      "& .MuiInputLabel-root": { color: textSecondary },
+                    }}
                   />
                 )}
                 <TextField
@@ -651,7 +814,36 @@ const LoginPage = () => {
                   value={formData.email}
                   onChange={handleChange}
                   fullWidth
+                  sx={{
+                    "& .MuiOutlinedInput-root": {
+                      backgroundColor: fieldBg,
+                      borderRadius: 2.5,
+                      "& fieldset": { borderColor: borderSoft },
+                      "&:hover fieldset": { borderColor: alpha(primaryMain, 0.4) },
+                      "&.Mui-focused fieldset": { borderColor: primaryMain, borderWidth: 1.5 },
+                    },
+                    "& .MuiInputLabel-root": { color: textSecondary },
+                  }}
                 />
+                {mode === "signup" && (
+                  <TextField
+                    label="Phone number (for SMS reset)"
+                    name="phone"
+                    value={formData.phone}
+                    onChange={handleChange}
+                    fullWidth
+                    sx={{
+                      "& .MuiOutlinedInput-root": {
+                        backgroundColor: fieldBg,
+                        borderRadius: 2.5,
+                        "& fieldset": { borderColor: borderSoft },
+                        "&:hover fieldset": { borderColor: alpha(primaryMain, 0.4) },
+                        "&.Mui-focused fieldset": { borderColor: primaryMain, borderWidth: 1.5 },
+                      },
+                      "& .MuiInputLabel-root": { color: textSecondary },
+                    }}
+                  />
+                )}
                 <TextField
                   label="Password"
                   name="password"
@@ -659,6 +851,16 @@ const LoginPage = () => {
                   value={formData.password}
                   onChange={handleChange}
                   fullWidth
+                  sx={{
+                    "& .MuiOutlinedInput-root": {
+                      backgroundColor: fieldBg,
+                      borderRadius: 2.5,
+                      "& fieldset": { borderColor: borderSoft },
+                      "&:hover fieldset": { borderColor: alpha(primaryMain, 0.4) },
+                      "&.Mui-focused fieldset": { borderColor: primaryMain, borderWidth: 1.5 },
+                    },
+                    "& .MuiInputLabel-root": { color: textSecondary },
+                  }}
                 />
                 {mode === "signup" && (
                   <TextField
@@ -668,6 +870,16 @@ const LoginPage = () => {
                     value={formData.confirmPassword}
                     onChange={handleChange}
                     fullWidth
+                    sx={{
+                      "& .MuiOutlinedInput-root": {
+                        backgroundColor: fieldBg,
+                        borderRadius: 2.5,
+                        "& fieldset": { borderColor: borderSoft },
+                        "&:hover fieldset": { borderColor: alpha(primaryMain, 0.4) },
+                        "&.Mui-focused fieldset": { borderColor: primaryMain, borderWidth: 1.5 },
+                      },
+                      "& .MuiInputLabel-root": { color: textSecondary },
+                    }}
                   />
                 )}
 
@@ -682,29 +894,39 @@ const LoginPage = () => {
                       gap: 1,
                     }}
                   >
-                    {roleOptions.map((option) => {
-                      const isSelected = selectedRole === option.value;
-                      return (
-                        <Button
-                          key={option.value}
-                          variant={isSelected ? "contained" : "outlined"}
-                          onClick={() => setSelectedRole(option.value)}
-                          startIcon={option.icon}
-                          sx={{
-                            textTransform: "none",
-                            fontWeight: 600,
-                            borderRadius: 2,
-                            borderColor: "rgba(15,23,42,0.18)",
-                            bgcolor: isSelected ? "#0f172a" : "transparent",
-                            color: isSelected ? "#fff" : "#0f172a",
-                            "&:hover": {
-                              bgcolor: isSelected ? "#111827" : "rgba(15,23,42,0.05)",
-                            },
-                          }}
-                        >
-                          {option.label}
-                        </Button>
-                      );
+                  {roleOptions.map((option) => {
+                    const isSelected = selectedRole === option.value;
+                    return (
+                      <Button
+                        key={option.value}
+                        variant={isSelected ? "contained" : "outlined"}
+                        onClick={() => setSelectedRole(option.value)}
+                        startIcon={option.icon}
+                        sx={{
+                          textTransform: "none",
+                          fontWeight: 600,
+                          borderRadius: 2,
+                          borderColor: isSelected ? alpha(primaryMain, 0.55) : borderSoft,
+                          bgcolor: isSelected ? primaryMain : alpha(surface, isDark ? 0.2 : 0.6),
+                          color: isSelected
+                            ? theme.palette.getContrastText(primaryMain)
+                            : textPrimary,
+                          boxShadow: isSelected
+                            ? `0 10px 22px ${alpha(primaryMain, 0.25)}`
+                            : "none",
+                          "&:hover": {
+                            bgcolor: isSelected
+                              ? primaryLight
+                              : alpha(primaryMain, isDark ? 0.14 : 0.08),
+                            borderColor: isSelected
+                              ? primaryLight
+                              : alpha(primaryMain, isDark ? 0.4 : 0.3),
+                          },
+                        }}
+                      >
+                        {option.label}
+                      </Button>
+                    );
                     })}
                   </Box>
                 </Box>
@@ -716,6 +938,17 @@ const LoginPage = () => {
                     fullWidth
                     required
                     helperText="Required for faculty access"
+                    sx={{
+                      "& .MuiOutlinedInput-root": {
+                        backgroundColor: fieldBg,
+                        borderRadius: 2.5,
+                        "& fieldset": { borderColor: borderSoft },
+                        "&:hover fieldset": { borderColor: alpha(primaryMain, 0.4) },
+                        "&.Mui-focused fieldset": { borderColor: primaryMain, borderWidth: 1.5 },
+                      },
+                      "& .MuiInputLabel-root": { color: textSecondary },
+                      "& .MuiFormHelperText-root": { color: textSecondary },
+                    }}
                   />
                 )}
                 {selectedRole === "student" && mode === "signup" && (
@@ -726,6 +959,17 @@ const LoginPage = () => {
                     fullWidth
                     required
                     helperText="Required for student access"
+                    sx={{
+                      "& .MuiOutlinedInput-root": {
+                        backgroundColor: fieldBg,
+                        borderRadius: 2.5,
+                        "& fieldset": { borderColor: borderSoft },
+                        "&:hover fieldset": { borderColor: alpha(primaryMain, 0.4) },
+                        "&.Mui-focused fieldset": { borderColor: primaryMain, borderWidth: 1.5 },
+                      },
+                      "& .MuiInputLabel-root": { color: textSecondary },
+                      "& .MuiFormHelperText-root": { color: textSecondary },
+                    }}
                   />
                 )}
 
@@ -736,12 +980,29 @@ const LoginPage = () => {
                     py: 1.2,
                     textTransform: "none",
                     fontWeight: 700,
-                    background: "linear-gradient(135deg, #2563eb 0%, #38bdf8 100%)",
-                    boxShadow: "0 10px 24px rgba(37,99,235,0.35)",
+                    background: primaryGradient,
+                    boxShadow: `0 12px 26px ${alpha(primaryMain, 0.35)}`,
+                    "&:hover": {
+                      background: `linear-gradient(135deg, ${primaryMain} 0%, ${primaryLight} 100%)`,
+                      boxShadow: `0 14px 28px ${alpha(primaryMain, 0.45)}`,
+                    },
                   }}
                 >
                   {mode === "signin" ? "Sign in" : "Create account"}
                 </Button>
+
+                {mode === "signin" && (
+                  <Box display="flex" justifyContent="flex-end">
+                    <Link
+                      component="button"
+                      type="button"
+                      onClick={openResetDialog}
+                      sx={{ fontWeight: 600, color: primaryMain }}
+                    >
+                      Forgot password?
+                    </Link>
+                  </Box>
+                )}
 
                 {authError && (
                   <Alert severity="error" sx={{ borderRadius: 2 }}>
@@ -750,7 +1011,15 @@ const LoginPage = () => {
                 )}
                 {needsFacultyLink && (
                   <Box>
-                    <Alert severity="info" sx={{ borderRadius: 2, mb: 2 }}>
+                    <Alert
+                      severity="info"
+                      sx={{
+                        borderRadius: 2,
+                        mb: 2,
+                        backgroundColor: alpha(theme.palette.info.main, isDark ? 0.18 : 0.1),
+                        border: `1px solid ${alpha(theme.palette.info.main, 0.3)}`,
+                      }}
+                    >
                       This faculty account needs to be linked to a Faculty ID once.
                     </Alert>
                     <TextField
@@ -760,10 +1029,30 @@ const LoginPage = () => {
                       fullWidth
                       required
                       helperText="Enter your faculty ID to complete setup"
+                      sx={{
+                        "& .MuiOutlinedInput-root": {
+                          backgroundColor: fieldBg,
+                          borderRadius: 2.5,
+                          "& fieldset": { borderColor: borderSoft },
+                          "&:hover fieldset": { borderColor: alpha(primaryMain, 0.4) },
+                          "&.Mui-focused fieldset": { borderColor: primaryMain, borderWidth: 1.5 },
+                        },
+                        "& .MuiInputLabel-root": { color: textSecondary },
+                        "& .MuiFormHelperText-root": { color: textSecondary },
+                      }}
                     />
                     <Button
                       variant="contained"
-                      sx={{ mt: 2, textTransform: "none", fontWeight: 700 }}
+                      sx={{
+                        mt: 2,
+                        textTransform: "none",
+                        fontWeight: 700,
+                        background: primaryGradient,
+                        boxShadow: `0 10px 22px ${alpha(primaryMain, 0.35)}`,
+                        "&:hover": {
+                          background: `linear-gradient(135deg, ${primaryMain} 0%, ${primaryLight} 100%)`,
+                        },
+                      }}
                       onClick={handleLinkFacultyId}
                       disabled={linking}
                     >
@@ -781,13 +1070,93 @@ const LoginPage = () => {
 
             <Typography variant="body2" color="text.secondary" align="center">
               {mode === "signin" ? "New here?" : "Already have an account?"}{" "}
-              <Link component="button" type="button" onClick={handleModeChange}>
+              <Link
+                component="button"
+                type="button"
+                onClick={handleModeChange}
+                sx={{ fontWeight: 600, color: primaryMain }}
+              >
                 {mode === "signin" ? "Create an account" : "Sign in"}
               </Link>
             </Typography>
           </Stack>
         </Paper>
       </Box>
+      <Dialog open={resetOpen} onClose={closeResetDialog} fullWidth maxWidth="xs">
+        <DialogTitle>Reset your password</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} mt={1}>
+            <Typography variant="body2" color="text.secondary">
+              We'll send a reset code to your email address.
+            </Typography>
+            <Chip
+              size="small"
+              label={`Role: ${selectedRole}`}
+              sx={{ alignSelf: "flex-start" }}
+            />
+            <TextField
+              label="Email address"
+              name="email"
+              type="email"
+              value={resetForm.email}
+              onChange={handleResetChange}
+              fullWidth
+            />
+            {resetStep === "verify" && (
+              <>
+                <TextField
+                  label="Email code"
+                  name="code"
+                  value={resetForm.code}
+                  onChange={handleResetChange}
+                  fullWidth
+                />
+                <TextField
+                  label="New password"
+                  name="newPassword"
+                  type="password"
+                  value={resetForm.newPassword}
+                  onChange={handleResetChange}
+                  fullWidth
+                />
+                <TextField
+                  label="Confirm new password"
+                  name="confirmPassword"
+                  type="password"
+                  value={resetForm.confirmPassword}
+                  onChange={handleResetChange}
+                  fullWidth
+                />
+              </>
+            )}
+            {resetStatus && (
+              <Alert severity={resetStatus.type}>{resetStatus.message}</Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={closeResetDialog} disabled={resetLoading}>
+            Cancel
+          </Button>
+          {resetStep === "request" ? (
+            <Button
+              variant="contained"
+              onClick={requestResetCode}
+              disabled={resetLoading}
+            >
+              {resetLoading ? "Sending..." : "Send code"}
+            </Button>
+          ) : (
+            <Button
+              variant="contained"
+              onClick={submitResetPassword}
+              disabled={resetLoading}
+            >
+              {resetLoading ? "Updating..." : "Reset password"}
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

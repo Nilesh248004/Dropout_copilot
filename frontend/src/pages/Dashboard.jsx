@@ -1,5 +1,5 @@
 // src/pages/Dashboard.jsx
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Container,
   Typography,
@@ -26,14 +26,31 @@ import {
 import StudentList from "./StudentList";
 import BatchPredictButton from "../components/BatchPredictButton";
 import RiskCharts from "../components/RiskChart";
+import StudentReportCharts from "../components/StudentReportCharts";
 import EmailCenter from "../components/EmailCenter";
 import axios from "axios";
+import { alpha, useTheme } from "@mui/material/styles";
 import { useRole } from "../context/RoleContext";
 import { API_BASE_URL } from "../config/api";
 import { filterStudentsByFaculty, normalizeFacultyId } from "../utils/faculty";
 import { getRiskLevel, getRiskScore } from "../utils/risk";
+import { useLocation, useNavigate } from "react-router-dom";
 const Dashboard = () => {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === "dark";
+  const textPrimary = theme.palette.text.primary;
+  const textSecondary = theme.palette.text.secondary;
+  const primaryMain = theme.palette.primary.main;
+  const primaryLight = theme.palette.primary.light || theme.palette.primary.main;
+  const surface = theme.palette.background.paper;
+  const borderSoft = alpha(textPrimary, isDark ? 0.18 : 0.12);
+  const borderStrong = alpha(textPrimary, isDark ? 0.28 : 0.18);
+  const panelShadow = `0 18px 50px ${alpha(theme.palette.common.black, isDark ? 0.45 : 0.08)}`;
+  const glassSurface = alpha(surface, isDark ? 0.72 : 0.9);
   const { role, facultyId, studentId, email } = useRole();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const reportInViewRef = useRef(false);
   const [students, setStudents] = useState([]);
   const [, setLoading] = useState(true);
   const [studentLookupLoading, setStudentLookupLoading] = useState(false);
@@ -44,6 +61,7 @@ const Dashboard = () => {
   const [queryFacultyId, setQueryFacultyId] = useState("");
   const [facultyFilter, setFacultyFilter] = useState("All Faculties");
   const [adminSearchQuery, setAdminSearchQuery] = useState("");
+  const [adminSearchTerm, setAdminSearchTerm] = useState("");
   const [counsellingRequests, setCounsellingRequests] = useState([]);
   const [counsellingLoading, setCounsellingLoading] = useState(false);
   const [counsellingError, setCounsellingError] = useState(null);
@@ -198,9 +216,92 @@ const Dashboard = () => {
     const score = getRiskScore(s);
     return score !== null && score <= 0.4;
   }).length;
-const isStudent = role === "student";
+  const isStudent = role === "student";
   const isFaculty = role === "faculty";
   const isAdmin = role === "admin";
+  const sectionPaperSx = {
+    p: { xs: 2.5, md: 3 },
+    mb: 4,
+    borderRadius: 4,
+    bgcolor: alpha(surface, isDark ? 0.92 : 0.98),
+    border: `1px solid ${borderSoft}`,
+    boxShadow: panelShadow,
+    backdropFilter: "blur(8px)",
+  };
+  const inputSx = {
+    "& .MuiOutlinedInput-root": {
+      backgroundColor: alpha(surface, isDark ? 0.55 : 0.9),
+      borderRadius: 2.5,
+      "& fieldset": { borderColor: borderSoft },
+      "&:hover fieldset": { borderColor: alpha(primaryMain, 0.4) },
+      "&.Mui-focused fieldset": { borderColor: primaryMain, borderWidth: 1.5 },
+    },
+    "& .MuiInputLabel-root": { color: textSecondary },
+    "& .MuiFormHelperText-root": { color: textSecondary },
+  };
+  const infoCardSx = {
+    p: 1.6,
+    borderRadius: 2.5,
+    bgcolor: glassSurface,
+    border: `1px solid ${borderSoft}`,
+    boxShadow: `0 12px 24px ${alpha(theme.palette.common.black, isDark ? 0.35 : 0.08)}`,
+    backdropFilter: "blur(6px)",
+  };
+  const snapshotCardSx = {
+    p: 1.6,
+    borderRadius: 2.5,
+    bgcolor: alpha(surface, isDark ? 0.78 : 0.88),
+    border: `1px solid ${borderSoft}`,
+    boxShadow: `0 12px 28px ${alpha(theme.palette.common.black, isDark ? 0.35 : 0.08)}`,
+    backdropFilter: "blur(8px)",
+  };
+
+  useEffect(() => {
+    if (!isStudent) return;
+    const wantsReport =
+      location.hash === "#my-report" || location.hash === "#my-report-graph";
+    if (!wantsReport) return;
+    const raf = window.requestAnimationFrame(() => {
+      const targetId =
+        location.hash === "#my-report-graph" ? "my-report-graph" : "my-report";
+      const target =
+        document.getElementById(targetId) || document.getElementById("my-report");
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [location.hash, isStudent]);
+
+  useEffect(() => {
+    if (!isStudent || location.pathname !== "/dashboard/student") return;
+    const target =
+      document.getElementById("my-report-graph") || document.getElementById("my-report");
+    if (!target) return;
+    const targetHash = target.id === "my-report-graph" ? "#my-report-graph" : "#my-report";
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry) return;
+        const inView = entry.isIntersecting && entry.intersectionRatio >= 0.45;
+        if (reportInViewRef.current === inView) return;
+        reportInViewRef.current = inView;
+
+        const nextHash = inView ? targetHash : "";
+        const currentHash = location.hash || "";
+        if (currentHash === nextHash) return;
+        navigate(
+          { pathname: location.pathname, search: location.search, hash: nextHash },
+          { replace: true }
+        );
+      },
+      { threshold: [0.45] }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [isStudent, location.pathname, location.search, location.hash, navigate]);
 
   const getFacultyForStudent = (student) => student?.faculty_id || "Unassigned";
   const facultyOptions = useMemo(() => {
@@ -491,8 +592,16 @@ const isStudent = role === "student";
         );
       })
     : counsellingRequests;
+  const pendingRequestsCount = facultyScopedRequests.filter(
+    (request) => String(request.status || "").toUpperCase() === "PENDING"
+  ).length;
+  const predictedCount = students.filter((student) => {
+    const level = String(student?.risk_level || "").toUpperCase();
+    return ["HIGH", "MEDIUM", "LOW"].includes(level);
+  }).length;
+  const pendingPredictionCount = Math.max(students.length - predictedCount, 0);
 
-  const normalizedAdminQuery = adminSearchQuery.trim().toLowerCase();
+  const normalizedAdminQuery = adminSearchTerm.trim().toLowerCase();
   const filteredAdminStudents = normalizedAdminQuery
     ? filteredByFaculty.filter((student) => {
         const name = student.name?.toLowerCase() || "";
@@ -500,13 +609,17 @@ const isStudent = role === "student";
         return name.includes(normalizedAdminQuery) || regNo.includes(normalizedAdminQuery);
       })
     : filteredByFaculty;
+  const selectedAdminStudent =
+    normalizedAdminQuery && filteredAdminStudents.length === 1
+      ? filteredAdminStudents[0]
+      : null;
 
   const studentRiskScore = getRiskScore(studentRecord);
-  const studentRiskLevel = getRiskLevel(studentRecord);
-  const studentRiskColor =
-    studentRiskScore === null ? "default" :
-    studentRiskScore > 0.7 ? "error" :
-    studentRiskScore > 0.4 ? "warning" : "success";
+  const studentRiskLevelRaw = studentRecord?.risk_level ?? null;
+  const studentRiskLevel =
+    typeof studentRiskLevelRaw === "string" ? studentRiskLevelRaw.toUpperCase() : null;
+  const hasStudentPrediction =
+    Boolean(studentRiskLevel) && ["HIGH", "MEDIUM", "LOW"].includes(studentRiskLevel);
   const highRiskStudents = students.filter((s) => getRiskLevel(s) === "HIGH");
   const facultyDisplayName = useMemo(() => {
     if (!email) return "Faculty Member";
@@ -530,22 +643,87 @@ const isStudent = role === "student";
     return cleaned.replace(/\b\w/g, (char) => char.toUpperCase());
   }, [email]);
   return (
-    <Container sx={{ mt: 4, mb: 6 }}>
+    <Container
+      sx={{
+        mt: 4,
+        mb: 6,
+        position: "relative",
+        "&::before": {
+          content: '""',
+          position: "absolute",
+          top: -140,
+          right: -120,
+          width: 260,
+          height: 260,
+          borderRadius: "50%",
+          background:
+            `radial-gradient(circle, ${alpha(primaryLight, 0.2)} 0%, ${alpha(primaryLight, 0)} 70%)`,
+          pointerEvents: "none",
+          zIndex: 0,
+        },
+        "&::after": {
+          content: '""',
+          position: "absolute",
+          bottom: -180,
+          left: -140,
+          width: 300,
+          height: 300,
+          borderRadius: "50%",
+          background:
+            `radial-gradient(circle, ${alpha(primaryMain, 0.18)} 0%, ${alpha(primaryMain, 0)} 70%)`,
+          pointerEvents: "none",
+          zIndex: 0,
+        },
+        "& > *": {
+          position: "relative",
+          zIndex: 1,
+        },
+      }}
+    >
 
       {/* ================= HEADER SECTION ================= */}
       <Paper
         sx={{
-          p: 3,
+          p: { xs: 2.5, md: 3.5 },
           mb: 4,
-          background: "linear-gradient(135deg, #1e3a8a 0%, #2563eb 45%, #38bdf8 100%)",
+          borderRadius: 5,
+          position: "relative",
+          overflow: "hidden",
+          background: isDark
+            ? "linear-gradient(135deg, #0f172a 0%, #1e3a8a 45%, #38bdf8 100%)"
+            : `linear-gradient(135deg, ${alpha(primaryMain, 0.95)} 0%, ${alpha(primaryLight, 0.9)} 55%, #38bdf8 100%)`,
           color: "#fff",
+          border: `1px solid ${borderSoft}`,
+          boxShadow: `0 30px 60px ${alpha(theme.palette.common.black, isDark ? 0.45 : 0.2)}`,
+          "&::before": {
+            content: '""',
+            position: "absolute",
+            top: -120,
+            right: -120,
+            width: 260,
+            height: 260,
+            borderRadius: "50%",
+            background:
+              `radial-gradient(circle, ${alpha(primaryLight, 0.45)} 0%, ${alpha(primaryLight, 0)} 70%)`,
+          },
+          "&::after": {
+            content: '""',
+            position: "absolute",
+            bottom: -140,
+            left: -120,
+            width: 260,
+            height: 260,
+            borderRadius: "50%",
+            background:
+              `radial-gradient(circle, ${alpha(primaryMain, 0.35)} 0%, ${alpha(primaryMain, 0)} 70%)`,
+          },
         }}
       >
         <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center" justifyContent="space-between">
           <Box>
             <Typography
               variant="overline"
-              sx={{ letterSpacing: 3, color: "rgba(255,255,255,0.75)" }}
+              sx={{ letterSpacing: 3, color: "rgba(255,255,255,0.78)" }}
             >
               Dropout Copilot
             </Typography>
@@ -574,24 +752,24 @@ const isStudent = role === "student";
               Role-based insights for {isStudent ? "students" : isFaculty ? "faculty" : "administrators"}.
             </Typography>
             <Stack direction="row" spacing={1} mt={2} flexWrap="wrap">
+                <Chip
+                  label={`Role: ${isStudent ? "Student" : isFaculty ? "Faculty" : "Admin"}`}
+                  size="small"
+                  sx={{
+                    bgcolor: "rgba(255,255,255,0.22)",
+                    color: "#fff",
+                    fontWeight: 600,
+                  }}
+                />
               <Chip
-                label={`Role: ${isStudent ? "Student" : isFaculty ? "Faculty" : "Admin"}`}
-                size="small"
-                sx={{
-                  bgcolor: "rgba(255,255,255,0.2)",
-                  color: "#fff",
-                  fontWeight: 600,
-                }}
-              />
-              <Chip
-                label="Live Risk Insights"
-                size="small"
-                sx={{
-                  bgcolor: "rgba(255,255,255,0.15)",
-                  color: "#e0f2fe",
-                  fontWeight: 600,
-                }}
-              />
+                  label="Live Risk Insights"
+                  size="small"
+                  sx={{
+                    bgcolor: "rgba(255,255,255,0.16)",
+                    color: "#e0f2fe",
+                    fontWeight: 600,
+                  }}
+                />
             </Stack>
           </Box>
           {/* Add Student moved to navbar */}
@@ -602,7 +780,29 @@ const isStudent = role === "student";
       {!isStudent && (
         <Grid container spacing={2} mb={4}>
           <Grid item xs={12} md={3}>
-            <Card sx={{ bgcolor: "#1e40af", color: "#fff" }}>
+            <Card
+              sx={{
+                height: "100%",
+                color: "#fff",
+                borderRadius: 3,
+                position: "relative",
+                overflow: "hidden",
+                background:
+                  "linear-gradient(135deg, #1d4ed8 0%, #2563eb 60%, #38bdf8 100%)",
+                boxShadow: "0 18px 40px rgba(30,64,175,0.35)",
+                border: "1px solid rgba(255,255,255,0.2)",
+                "&::after": {
+                  content: '""',
+                  position: "absolute",
+                  top: -40,
+                  right: -40,
+                  width: 120,
+                  height: 120,
+                  borderRadius: "50%",
+                  background: "rgba(255,255,255,0.18)",
+                },
+              }}
+            >
               <CardContent>
                 <Typography>Total Students</Typography>
                 <Typography variant="h4">{totalStudents}</Typography>
@@ -611,7 +811,29 @@ const isStudent = role === "student";
           </Grid>
 
         <Grid item xs={12} md={3}>
-            <Card sx={{ bgcolor: "#b91c1c", color: "#fff" }}>
+            <Card
+              sx={{
+                height: "100%",
+                color: "#fff",
+                borderRadius: 3,
+                position: "relative",
+                overflow: "hidden",
+                background:
+                  "linear-gradient(135deg, #991b1b 0%, #dc2626 55%, #f87171 100%)",
+                boxShadow: "0 18px 40px rgba(185,28,28,0.35)",
+                border: "1px solid rgba(255,255,255,0.2)",
+                "&::after": {
+                  content: '""',
+                  position: "absolute",
+                  top: -40,
+                  right: -40,
+                  width: 120,
+                  height: 120,
+                  borderRadius: "50%",
+                  background: "rgba(255,255,255,0.14)",
+                },
+              }}
+            >
               <CardContent>
                 <Typography>High Risk</Typography>
                 <Typography variant="h4">{highRisk}</Typography>
@@ -620,7 +842,29 @@ const isStudent = role === "student";
           </Grid>
 
         <Grid item xs={12} md={3}>
-            <Card sx={{ bgcolor: "#ea580c", color: "#fff" }}>
+            <Card
+              sx={{
+                height: "100%",
+                color: "#fff",
+                borderRadius: 3,
+                position: "relative",
+                overflow: "hidden",
+                background:
+                  "linear-gradient(135deg, #c2410c 0%, #ea580c 55%, #fb923c 100%)",
+                boxShadow: "0 18px 40px rgba(234,88,12,0.35)",
+                border: "1px solid rgba(255,255,255,0.2)",
+                "&::after": {
+                  content: '""',
+                  position: "absolute",
+                  top: -40,
+                  right: -40,
+                  width: 120,
+                  height: 120,
+                  borderRadius: "50%",
+                  background: "rgba(255,255,255,0.16)",
+                },
+              }}
+            >
               <CardContent>
                 <Typography>Medium Risk</Typography>
                 <Typography variant="h4">{mediumRisk}</Typography>
@@ -629,7 +873,29 @@ const isStudent = role === "student";
           </Grid>
 
         <Grid item xs={12} md={3}>
-            <Card sx={{ bgcolor: "#15803d", color: "#fff" }}>
+            <Card
+              sx={{
+                height: "100%",
+                color: "#fff",
+                borderRadius: 3,
+                position: "relative",
+                overflow: "hidden",
+                background:
+                  "linear-gradient(135deg, #166534 0%, #16a34a 55%, #4ade80 100%)",
+                boxShadow: "0 18px 40px rgba(22,163,74,0.35)",
+                border: "1px solid rgba(255,255,255,0.2)",
+                "&::after": {
+                  content: '""',
+                  position: "absolute",
+                  top: -40,
+                  right: -40,
+                  width: 120,
+                  height: 120,
+                  borderRadius: "50%",
+                  background: "rgba(255,255,255,0.16)",
+                },
+              }}
+            >
               <CardContent>
                 <Typography>Low Risk</Typography>
                 <Typography variant="h4">{lowRisk}</Typography>
@@ -641,358 +907,336 @@ const isStudent = role === "student";
 
       {/* ================= STUDENT VIEW ================= */}
       {isStudent && (
-        <Paper sx={{ p: 3, mb: 4 }}>
-          <Typography variant="h6" mb={2}>👤 My Predicted Report</Typography>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
-            <TextField
-              label="Registration Number"
-              placeholder="Enter your reg no"
-              value={studentRegNo}
-              onChange={(event) => setStudentRegNo(event.target.value)}
-              disabled={Boolean(studentId)}
-              helperText={studentId ? "Loaded from your login" : ""}
-              sx={{ minWidth: 240 }}
+        <>
+          <Paper
+            sx={{
+              ...sectionPaperSx,
+              position: "relative",
+              overflow: "hidden",
+            }}
+          >
+            <Box
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 6,
+                background: "linear-gradient(90deg, #2563eb, #38bdf8, #a5f3fc)",
+              }}
             />
-            <Button variant="contained" onClick={handleStudentLookup} disabled={studentLookupLoading}>
-              View My Report
-            </Button>
-          </Stack>
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={2.5}
+              alignItems={{ md: "center" }}
+              justifyContent="space-between"
+              mb={2}
+            >
+              <Box>
+                <Typography variant="overline" sx={{ letterSpacing: 3, color: "text.secondary" }}>
+                  Student Snapshot
+                </Typography>
+                <Typography variant="h6" mb={0.5}>Status and Details</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Logged student profile and current prediction status.
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap">
+                <Chip
+                  size="small"
+                  label={!studentRecord ? "Record Not Loaded" : hasStudentPrediction ? "Prediction Ready" : "Prediction Pending"}
+                  color={!studentRecord ? "default" : hasStudentPrediction ? "success" : "warning"}
+                />
+                <Chip
+                  size="small"
+                  label={`Reg No: ${studentRecord?.register_number || studentId || "Not set"}`}
+                  variant="outlined"
+                  sx={{ borderColor: borderStrong, color: textPrimary }}
+                />
+              </Stack>
+            </Stack>
 
-      <Divider sx={{ my: 3 }} />
+            <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
+              <TextField
+                label="Registration Number"
+                placeholder="Enter your reg no"
+                value={studentRegNo}
+                onChange={(event) => setStudentRegNo(event.target.value)}
+                disabled={Boolean(studentId)}
+                helperText={studentId ? "Loaded from your login" : ""}
+                sx={{ minWidth: 240, ...inputSx }}
+              />
+              <Button
+                variant="contained"
+                onClick={handleStudentLookup}
+                disabled={studentLookupLoading}
+                sx={{
+                  textTransform: "none",
+                  fontWeight: 700,
+                  px: 3,
+                  borderRadius: 999,
+                  background: `linear-gradient(135deg, ${primaryMain} 0%, ${primaryLight} 100%)`,
+                  boxShadow: `0 12px 24px ${alpha(primaryMain, 0.35)}`,
+                  "&:hover": {
+                    background: `linear-gradient(135deg, ${primaryMain} 0%, ${primaryLight} 100%)`,
+                    boxShadow: `0 14px 26px ${alpha(primaryMain, 0.45)}`,
+                  },
+                }}
+              >
+                View My Report
+              </Button>
+            </Stack>
 
-      {studentRecord ? (
-            <Grid container spacing={2}>
-              <Grid item xs={12} md={6}>
-                <Paper
+            <Divider sx={{ my: 3, borderColor: borderSoft }} />
+
+            {studentRecord ? (
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6} md={4}>
+                  <Paper variant="outlined" sx={infoCardSx}>
+                    <Typography variant="caption" color="text.secondary">
+                      Student Name
+                    </Typography>
+                    <Typography fontWeight={700}>{studentRecord.name || "Not available"}</Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} sm={6} md={4}>
+                  <Paper variant="outlined" sx={infoCardSx}>
+                    <Typography variant="caption" color="text.secondary">
+                      Register Number
+                    </Typography>
+                    <Typography fontWeight={700}>{studentRecord.register_number || "Not available"}</Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} sm={6} md={4}>
+                  <Paper variant="outlined" sx={infoCardSx}>
+                    <Typography variant="caption" color="text.secondary">
+                      Year / Semester
+                    </Typography>
+                    <Typography fontWeight={700}>
+                      {studentRecord.year || "N/A"} / {studentRecord.semester || "N/A"}
+                    </Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} sm={6} md={4}>
+                  <Paper variant="outlined" sx={infoCardSx}>
+                    <Typography variant="caption" color="text.secondary">
+                      Attendance
+                    </Typography>
+                    <Typography fontWeight={700}>
+                      {studentRecord.attendance ?? "N/A"}%
+                    </Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} sm={6} md={4}>
+                  <Paper variant="outlined" sx={infoCardSx}>
+                    <Typography variant="caption" color="text.secondary">
+                      CGPA
+                    </Typography>
+                    <Typography fontWeight={700}>{studentRecord.cgpa ?? "N/A"}</Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} sm={6} md={4}>
+                  <Paper variant="outlined" sx={infoCardSx}>
+                    <Typography variant="caption" color="text.secondary">
+                      Dropout Risk
+                    </Typography>
+                    <Typography fontWeight={700}>
+                      {Number.isFinite(studentRiskScore)
+                        ? `${(studentRiskScore * 100).toFixed(1)}%`
+                        : "Pending"}
+                    </Typography>
+                  </Paper>
+                </Grid>
+              </Grid>
+            ) : (
+              <Alert severity="info" sx={{ mt: 2 }}>
+                Enter your registration number to load student details.
+              </Alert>
+            )}
+          </Paper>
+
+          <Paper
+            sx={{
+              ...sectionPaperSx,
+              position: "relative",
+              overflow: "hidden",
+            }}
+          >
+            <Box
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 6,
+                background: "linear-gradient(90deg, #14b8a6, #22c55e, #a3e635)",
+              }}
+            />
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={2}
+              alignItems={{ md: "center" }}
+              justifyContent="space-between"
+              mb={2}
+            >
+              <Box>
+                <Typography variant="overline" sx={{ letterSpacing: 3, color: "text.secondary" }}>
+                  Student Support
+                </Typography>
+                <Typography variant="h6" mb={0.5}>Support Request</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Send a query to your faculty advisor for academic or counselling support.
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap">
+                <Chip
+                  size="small"
+                  label={`Faculty: ${studentRecord?.faculty_id || queryFacultyId || "Unassigned"}`}
+                  variant="outlined"
+                  sx={{ borderColor: borderStrong, color: textPrimary }}
+                />
+              </Stack>
+            </Stack>
+            <Stack spacing={2}>
+              <TextField
+                label="Faculty ID"
+                value={queryFacultyId}
+                onChange={(event) => setQueryFacultyId(event.target.value)}
+                fullWidth
+                disabled={Boolean(studentRecord?.faculty_id)}
+                helperText={
+                  studentRecord?.faculty_id
+                    ? "Mapped to your faculty advisor"
+                    : "Enter the faculty ID for your request"
+                }
+                sx={inputSx}
+              />
+              <TextField
+                label="Describe your concern"
+                multiline
+                minRows={3}
+                value={queryReason}
+                onChange={(event) => setQueryReason(event.target.value)}
+                fullWidth
+                sx={inputSx}
+              />
+              <Box>
+                <Button
+                  variant="contained"
                   sx={{
-                    position: "relative",
-                    overflow: "hidden",
-                    p: { xs: 2.5, md: 3 },
-                    borderRadius: 4,
-                    background:
-                      "linear-gradient(140deg, rgba(15, 23, 42, 0.03) 0%, rgba(59, 130, 246, 0.12) 55%, rgba(236, 254, 255, 0.6) 100%)",
-                    border: "1px solid rgba(148, 163, 184, 0.25)",
-                    boxShadow: "0 20px 60px rgba(15, 23, 42, 0.12)",
-                    "&::before": {
-                      content: '""',
-                      position: "absolute",
-                      top: -120,
-                      right: -120,
-                      width: 220,
-                      height: 220,
-                      borderRadius: "50%",
-                      background:
-                        "radial-gradient(circle, rgba(59,130,246,0.35) 0%, rgba(59,130,246,0) 65%)",
-                    },
-                    "&::after": {
-                      content: '""',
-                      position: "absolute",
-                      bottom: -140,
-                      left: -140,
-                      width: 240,
-                      height: 240,
-                      borderRadius: "50%",
-                      background:
-                        "radial-gradient(circle, rgba(14,165,233,0.25) 0%, rgba(14,165,233,0) 70%)",
+                    textTransform: "none",
+                    fontWeight: 700,
+                    px: 3,
+                    borderRadius: 999,
+                    background: `linear-gradient(135deg, ${primaryMain} 0%, ${primaryLight} 100%)`,
+                    boxShadow: `0 12px 24px ${alpha(primaryMain, 0.35)}`,
+                    "&:hover": {
+                      background: `linear-gradient(135deg, ${primaryMain} 0%, ${primaryLight} 100%)`,
+                      boxShadow: `0 14px 26px ${alpha(primaryMain, 0.45)}`,
                     },
                   }}
+                  disabled={!studentRecord || !String(studentRecord?.faculty_id || queryFacultyId || "").trim()}
+                  onClick={handleSubmitQuery}
                 >
-                  <Box
-                    sx={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      height: 6,
-                      background: "linear-gradient(90deg, #2563eb, #38bdf8, #0ea5e9)",
-                    }}
-                  />
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2.5} alignItems={{ sm: "center" }} mb={2.5}>
-                    <Box
-                      sx={{
-                        width: 64,
-                        height: 64,
-                        borderRadius: "18px",
-                        display: "grid",
-                        placeItems: "center",
-                        fontWeight: 800,
-                        fontSize: 24,
-                        color: "#0f172a",
-                        bgcolor: "rgba(255,255,255,0.85)",
-                        border: "2px solid rgba(37, 99, 235, 0.35)",
-                        boxShadow: "0 18px 30px rgba(37, 99, 235, 0.25)",
-                      }}
-                    >
-                      {String(studentRecord.name || "S")
-                        .trim()
-                        .charAt(0)
-                        .toUpperCase()}
-                    </Box>
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="overline" sx={{ letterSpacing: 3, color: "text.secondary" }}>
-                        Student Snapshot
-                      </Typography>
-                      <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: -0.5 }}>
-                        {studentRecord.name}
-                      </Typography>
-                      <Stack direction="row" spacing={1} mt={1} flexWrap="wrap">
-                        <Chip
-                          size="small"
-                          label={studentRiskLevel ? `Risk: ${studentRiskLevel}` : "Risk: Pending"}
-                          color={studentRiskColor}
-                          sx={{ fontWeight: 600 }}
-                        />
-                        <Chip
-                          size="small"
-                          label={studentRecord.register_number || "Reg No N/A"}
-                          variant="outlined"
-                        />
-                      </Stack>
-                    </Box>
-                  </Stack>
-
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} sm={6}>
-                      <Paper
-                        variant="outlined"
-                        sx={{
-                          p: 1.6,
-                          borderRadius: 2.5,
-                          bgcolor: "rgba(255,255,255,0.7)",
-                          backdropFilter: "blur(6px)",
-                        }}
-                      >
-                        <Typography variant="caption" color="text.secondary">
-                          Faculty ID
-                        </Typography>
-                        <Typography fontWeight={700}>
-                          {studentRecord.faculty_id || "Unassigned"}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <Paper
-                        variant="outlined"
-                        sx={{
-                          p: 1.6,
-                          borderRadius: 2.5,
-                          bgcolor: "rgba(255,255,255,0.7)",
-                          backdropFilter: "blur(6px)",
-                        }}
-                      >
-                        <Typography variant="caption" color="text.secondary">
-                          Faculty Email
-                        </Typography>
-                        <Typography fontWeight={700} sx={{ wordBreak: "break-word" }}>
-                          {studentRecord.faculty_email || "Not available"}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <Paper
-                        variant="outlined"
-                        sx={{
-                          p: 1.6,
-                          borderRadius: 2.5,
-                          bgcolor: "rgba(255,255,255,0.7)",
-                          backdropFilter: "blur(6px)",
-                        }}
-                      >
-                        <Typography variant="caption" color="text.secondary">
-                          Year / Semester
-                        </Typography>
-                        <Typography fontWeight={700}>
-                          {studentRecord.year} / {studentRecord.semester}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <Paper
-                        variant="outlined"
-                        sx={{
-                          p: 1.6,
-                          borderRadius: 2.5,
-                          bgcolor: "rgba(255,255,255,0.7)",
-                          backdropFilter: "blur(6px)",
-                        }}
-                      >
-                        <Typography variant="caption" color="text.secondary">
-                          Attendance
-                        </Typography>
-                        <Typography fontWeight={700}>
-                          {studentRecord.attendance ?? "N/A"}%
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <Paper
-                        variant="outlined"
-                        sx={{
-                          p: 1.6,
-                          borderRadius: 2.5,
-                          bgcolor: "rgba(255,255,255,0.7)",
-                          backdropFilter: "blur(6px)",
-                        }}
-                      >
-                        <Typography variant="caption" color="text.secondary">
-                          CGPA
-                        </Typography>
-                        <Typography fontWeight={700}>
-                          {studentRecord.cgpa ?? "N/A"}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <Paper
-                        variant="outlined"
-                        sx={{
-                          p: 1.6,
-                          borderRadius: 2.5,
-                          bgcolor: "rgba(255,255,255,0.7)",
-                          backdropFilter: "blur(6px)",
-                        }}
-                      >
-                        <Typography variant="caption" color="text.secondary">
-                          Phone Number
-                        </Typography>
-                        <Typography fontWeight={700}>
-                          {studentRecord.phone_number || "N/A"}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                  </Grid>
-                </Paper>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <Paper sx={{ p: 2 }}>
-                  <Typography variant="subtitle1" mb={1}>Prediction Status</Typography>
-                  <Chip
-                    label={
-                      studentRiskScore === null
-                        ? "Pending"
-                        : `${(studentRiskScore * 100).toFixed(2)}% - ${studentRiskLevel || "Pending"}`
-                    }
-                    color={studentRiskColor}
-                    sx={{ mb: 2 }}
-                  />
-                  <Typography>
-                    Risk Insight: {studentRiskScore !== null && studentRiskScore > 0.6
-                      ? "High risk detected. Please contact your faculty advisor."
-                      : "Your risk is within a healthy range. Keep up the momentum!"}
-                  </Typography>
-                </Paper>
-              </Grid>
-            </Grid>
-          ) : (
-            <Alert severity="info" sx={{ mt: 2 }}>
-              Enter your registration number to view your personalized report.
-            </Alert>
-          )}
-
-          {studentRecord && (
-            <Paper sx={{ p: 3, mt: 3, bgcolor: "#f8fafc" }}>
-              <Typography variant="h6" mb={2}>📊 My Performance Trends</Typography>
-              <RiskCharts students={[studentRecord]} />
-            </Paper>
-          )}
-
-<Typography variant="h6" mb={1}>🗂 Raise a Support Query</Typography>
-          <Typography variant="body2" color="text.secondary" mb={2}>
-            Share your concern to request academic or counselling support.
-          </Typography>
-          <TextField
-            label="Faculty ID"
-            value={queryFacultyId}
-            onChange={(event) => setQueryFacultyId(event.target.value)}
-            fullWidth
-            disabled={Boolean(studentRecord?.faculty_id)}
-            helperText={
-              studentRecord?.faculty_id
-                ? "Mapped to your faculty advisor"
-                : "Enter the faculty ID for your request"
-            }
-            sx={{ mb: 2 }}
-          />
-          <TextField
-            label="Describe your concern"
-            multiline
-            minRows={3}
-            value={queryReason}
-            onChange={(event) => setQueryReason(event.target.value)}
-            fullWidth
-          />
-          <Button
-            variant="contained"
-            sx={{ mt: 2 }}
-            disabled={!studentRecord || !String(studentRecord?.faculty_id || queryFacultyId || "").trim()}
-            onClick={handleSubmitQuery}
-          >
-            Submit Query
-          </Button>
-          {queryStatus?.type === "success" && (
-            <Alert severity="success" sx={{ mt: 2 }}>
-              {queryStatus.message}
-            </Alert>
-          )}
-          {queryStatus?.type === "error" && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {queryStatus.message}
-            </Alert>
-          )}
-
-          <Divider sx={{ my: 3 }} />
-          <Typography variant="h6" mb={2}>My Support Queries</Typography>
-          {!studentRecord && (
-            <Alert severity="info">Look up your registration number to view your query status.</Alert>
-          )}
-          {studentRecord && counsellingLoading && (
-            <Box display="flex" justifyContent="center" mt={2}>
-              <CircularProgress size={24} />
-            </Box>
-          )}
-          {studentRecord && !counsellingLoading && studentScopedRequests.length === 0 && (
-            <Alert severity="info">No support queries yet.</Alert>
-          )}
-          {studentRecord && studentScopedRequests.length > 0 && (
-            <Stack spacing={2}>
-              {studentScopedRequests.map((request) => (
-                <Paper key={request.id} sx={{ p: 2, bgcolor: "#f8fafc" }}>
-                  <Stack
-                    direction={{ xs: "column", md: "row" }}
-                    spacing={2}
-                    alignItems={{ md: "center" }}
-                    justifyContent="space-between"
-                  >
-                    <Box>
-                      <Typography fontWeight={600}>{request.reason || "Support request"}</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Sent to {request.faculty_label || request.faculty_id || "Faculty"} - {formatRequestDate(request.request_date)}
-                      </Typography>
-                    </Box>
-                    <Chip
-                      label={request.status || "PENDING"}
-                      color={counsellingStatusColor(request.status)}
-                      sx={{ alignSelf: { xs: "flex-start", md: "center" } }}
-                    />
-                  </Stack>
-                </Paper>
-              ))}
+                  Submit Query
+                </Button>
+              </Box>
             </Stack>
-          )}
-          {counsellingError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {counsellingError}
-            </Alert>
-          )}
-        </Paper>
+            {queryStatus?.type === "success" && (
+              <Alert severity="success" sx={{ mt: 2 }}>
+                {queryStatus.message}
+              </Alert>
+            )}
+            {queryStatus?.type === "error" && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                {queryStatus.message}
+              </Alert>
+            )}
+
+            <Divider sx={{ my: 3, borderColor: borderSoft }} />
+
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={2}
+              alignItems={{ md: "center" }}
+              justifyContent="space-between"
+              mb={2}
+            >
+              <Box>
+                <Typography variant="overline" sx={{ letterSpacing: 3, color: "text.secondary" }}>
+                  Support History
+                </Typography>
+                <Typography variant="h6" mb={0.5}>My Support Queries</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Track the status of your requests and responses.
+                </Typography>
+              </Box>
+              <Chip
+                size="small"
+                label={`Total: ${studentScopedRequests.length}`}
+                variant="outlined"
+              />
+            </Stack>
+            {!studentRecord && (
+              <Alert severity="info">Look up your registration number to view your query status.</Alert>
+            )}
+            {studentRecord && counsellingLoading && (
+              <Box display="flex" justifyContent="center" mt={2}>
+                <CircularProgress size={24} />
+              </Box>
+            )}
+            {studentRecord && !counsellingLoading && studentScopedRequests.length === 0 && (
+              <Alert severity="info">No support queries yet.</Alert>
+            )}
+            {studentRecord && studentScopedRequests.length > 0 && (
+              <Stack spacing={2}>
+                {studentScopedRequests.map((request) => (
+                  <Paper
+                    key={request.id}
+                    sx={{
+                      p: 2,
+                      bgcolor: alpha(surface, isDark ? 0.6 : 0.92),
+                      border: `1px solid ${borderSoft}`,
+                      boxShadow: `0 10px 20px ${alpha(theme.palette.common.black, isDark ? 0.25 : 0.06)}`,
+                      borderRadius: 3,
+                    }}
+                  >
+                    <Stack
+                      direction={{ xs: "column", md: "row" }}
+                      spacing={2}
+                      alignItems={{ md: "center" }}
+                      justifyContent="space-between"
+                    >
+                      <Box>
+                        <Typography fontWeight={600}>{request.reason || "Support request"}</Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Sent to {request.faculty_label || request.faculty_id || "Faculty"} - {formatRequestDate(request.request_date)}
+                        </Typography>
+                      </Box>
+                      <Chip
+                        label={request.status || "PENDING"}
+                        color={counsellingStatusColor(request.status)}
+                        sx={{ alignSelf: { xs: "flex-start", md: "center" } }}
+                      />
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            )}
+            {counsellingError && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                {counsellingError}
+              </Alert>
+            )}
+          </Paper>
+        </>
       )}
 
       {isStudent && (
-        <Paper sx={{ p: 3, mb: 4 }}>
+        <Paper sx={{ ...sectionPaperSx }}>
           <EmailCenter role={role} />
         </Paper>
       )}
-
       {/* ================= FACULTY VIEW ================= */}
       {isFaculty && (
         <>
@@ -1060,11 +1304,19 @@ const isStudent = role === "student";
                 <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: -0.5 }}>
                   {facultyDisplayName}
                 </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Cohort health and prediction coverage at a glance.
+                </Typography>
                 <Stack direction="row" spacing={1} mt={1} flexWrap="wrap">
                   <Chip size="small" label="Faculty" color="info" sx={{ fontWeight: 600 }} />
                   <Chip
                     size="small"
-                    label={`Mapped Students: ${students.length}`}
+                    label={`Open Requests: ${pendingRequestsCount}`}
+                    variant="outlined"
+                  />
+                  <Chip
+                    size="small"
+                    label={`Predictions Pending: ${pendingPredictionCount}`}
                     variant="outlined"
                   />
                 </Stack>
@@ -1072,39 +1324,125 @@ const isStudent = role === "student";
             </Stack>
 
             <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} md={6}>
                 <Paper
                   variant="outlined"
-                  sx={{
-                    p: 1.6,
-                    borderRadius: 2.5,
-                    bgcolor: "rgba(255,255,255,0.7)",
-                    backdropFilter: "blur(6px)",
-                  }}
+                  sx={snapshotCardSx}
                 >
                   <Typography variant="caption" color="text.secondary">
                     Faculty ID
                   </Typography>
-                  <Typography fontWeight={700}>
+                  <Typography variant="h6" fontWeight={800}>
                     {facultyId || "Not linked"}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Mapped to your profile.
                   </Typography>
                 </Paper>
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} md={6}>
                 <Paper
                   variant="outlined"
-                  sx={{
-                    p: 1.6,
-                    borderRadius: 2.5,
-                    bgcolor: "rgba(255,255,255,0.7)",
-                    backdropFilter: "blur(6px)",
-                  }}
+                  sx={snapshotCardSx}
                 >
                   <Typography variant="caption" color="text.secondary">
                     Email
                   </Typography>
-                  <Typography fontWeight={700} sx={{ wordBreak: "break-word" }}>
+                  <Typography variant="h6" fontWeight={800} sx={{ wordBreak: "break-word" }}>
                     {email || "Not available"}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Used for alerts and exports.
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Paper variant="outlined" sx={snapshotCardSx}>
+                  <Typography variant="caption" color="text.secondary">
+                    Mapped Students
+                  </Typography>
+                  <Typography variant="h5" fontWeight={800}>
+                    {students.length}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Active cohort size.
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    ...snapshotCardSx,
+                    borderColor: alpha(theme.palette.warning.main, isDark ? 0.45 : 0.35),
+                    bgcolor: alpha(theme.palette.warning.light, isDark ? 0.14 : 0.2),
+                  }}
+                >
+                  <Typography variant="caption" color="text.secondary">
+                    Predictions Pending
+                  </Typography>
+                  <Typography variant="h5" fontWeight={800}>
+                    {pendingPredictionCount}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {predictedCount} already predicted.
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    ...snapshotCardSx,
+                    borderColor: alpha(theme.palette.info.main, isDark ? 0.4 : 0.3),
+                    bgcolor: alpha(theme.palette.info.light, isDark ? 0.12 : 0.18),
+                  }}
+                >
+                  <Typography variant="caption" color="text.secondary">
+                    Open Requests
+                  </Typography>
+                  <Typography variant="h5" fontWeight={800}>
+                    {pendingRequestsCount}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Pending counselling actions.
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    ...snapshotCardSx,
+                    borderColor: alpha(theme.palette.error.main, isDark ? 0.4 : 0.3),
+                    bgcolor: alpha(theme.palette.error.light, isDark ? 0.12 : 0.18),
+                  }}
+                >
+                  <Typography variant="caption" color="text.secondary">
+                    Risk Mix
+                  </Typography>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" mt={0.8}>
+                    <Chip
+                      size="small"
+                      label={`High ${highRisk}`}
+                      color="error"
+                      variant="outlined"
+                    />
+                    <Chip
+                      size="small"
+                      label={`Med ${mediumRisk}`}
+                      color="warning"
+                      variant="outlined"
+                    />
+                    <Chip
+                      size="small"
+                      label={`Low ${lowRisk}`}
+                      color="success"
+                      variant="outlined"
+                    />
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+                    Distribution for mapped students.
                   </Typography>
                 </Paper>
               </Grid>
@@ -1112,7 +1450,7 @@ const isStudent = role === "student";
           </Paper>
 
           {/* ================= ACTION SECTION ================= */}
-          <Paper sx={{ p: 3, mb: 4 }}>
+          <Paper sx={{ ...sectionPaperSx }}>
             <Typography variant="h6" mb={2}>⚡ Faculty AI Actions</Typography>
             <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
               <BatchPredictButton reload={fetchStudents} />
@@ -1122,7 +1460,7 @@ const isStudent = role === "student";
             </Stack>
           </Paper>
 
-          <Paper sx={{ p: 3, mb: 4 }}>
+          <Paper sx={{ ...sectionPaperSx }}>
             <Typography variant="h6" mb={1}>
               Upload Export for Admin Review
             </Typography>
@@ -1155,13 +1493,13 @@ const isStudent = role === "student";
           </Paper>
 
           {/* ================= RISK ANALYTICS SECTION ================= */}
-          <Paper sx={{ p: 3, mb: 4 }}>
+          <Paper sx={{ ...sectionPaperSx }}>
             <Typography variant="h6" mb={2}>📊 Risk Analytics Overview</Typography>
             <RiskCharts students={students} />
           </Paper>
 
           {/* ================= HIGH RISK ALERTS ================= */}
-          <Paper sx={{ p: 3, mb: 4 }}>
+          <Paper sx={{ ...sectionPaperSx }}>
             <Typography variant="h6" mb={2}>🚨 High-Risk Student Alerts</Typography>
             {studentAlertStatus && (
               <Alert severity={studentAlertStatus.type} sx={{ mb: 2 }}>
@@ -1202,7 +1540,7 @@ const isStudent = role === "student";
           </Paper>
 
           {/* ================= COUNSELLING REQUESTS ================= */}
-          <Paper sx={{ p: 3, mb: 4 }}>
+          <Paper sx={{ ...sectionPaperSx }}>
             <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center" mb={2}>
               <Box>
                 <Typography variant="h6">Student Support Queries</Typography>
@@ -1290,7 +1628,7 @@ const isStudent = role === "student";
           </Paper>
 
           {/* ================= STUDENT MANAGEMENT SECTION ================= */}
-          <Paper sx={{ p: 3, boxShadow: 3, overflowX: "auto" }}>
+          <Paper sx={{ ...sectionPaperSx, overflowX: "auto" }}>
             <Typography variant="h6" mb={2}>📋 Student Management</Typography>
             <StudentList
               students={students}
@@ -1298,7 +1636,7 @@ const isStudent = role === "student";
             />
           </Paper>
 
-          <Paper sx={{ p: 3, mt: 4 }}>
+          <Paper sx={{ ...sectionPaperSx, mt: 4 }}>
             <EmailCenter role={role} />
           </Paper>
         </>
@@ -1374,65 +1712,120 @@ const isStudent = role === "student";
                 <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: -0.5 }}>
                   {adminDisplayName}
                 </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Portfolio coverage and intervention load at a glance.
+                </Typography>
                 <Stack direction="row" spacing={1} mt={1} flexWrap="wrap">
                   <Chip size="small" label="Administrator" color="primary" sx={{ fontWeight: 600 }} />
                   <Chip size="small" label={`Total Students: ${students.length}`} variant="outlined" />
+                  <Chip
+                    size="small"
+                    label={`Predictions Pending: ${pendingPredictionCount}`}
+                    variant="outlined"
+                  />
                 </Stack>
               </Box>
             </Stack>
 
             <Grid container spacing={2}>
-              <Grid item xs={12} sm={4}>
-                <Paper
-                  variant="outlined"
-                  sx={{
-                    p: 1.6,
-                    borderRadius: 2.5,
-                    bgcolor: "rgba(255,255,255,0.7)",
-                    backdropFilter: "blur(6px)",
-                  }}
-                >
+              <Grid item xs={12} md={6}>
+                <Paper variant="outlined" sx={snapshotCardSx}>
                   <Typography variant="caption" color="text.secondary">
                     Email
                   </Typography>
-                  <Typography fontWeight={700} sx={{ wordBreak: "break-word" }}>
+                  <Typography variant="h6" fontWeight={800} sx={{ wordBreak: "break-word" }}>
                     {email || "Not available"}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Used for admin alerts and exports.
                   </Typography>
                 </Paper>
               </Grid>
-              <Grid item xs={12} sm={4}>
-                <Paper
-                  variant="outlined"
-                  sx={{
-                    p: 1.6,
-                    borderRadius: 2.5,
-                    bgcolor: "rgba(255,255,255,0.7)",
-                    backdropFilter: "blur(6px)",
-                  }}
-                >
+              <Grid item xs={12} sm={6} md={3}>
+                <Paper variant="outlined" sx={snapshotCardSx}>
                   <Typography variant="caption" color="text.secondary">
                     Faculty Count
                   </Typography>
-                  <Typography fontWeight={700}>
+                  <Typography variant="h5" fontWeight={800}>
                     {facultyOptions.length > 1 ? facultyOptions.length - 1 : 0}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Active faculty groups.
                   </Typography>
                 </Paper>
               </Grid>
-              <Grid item xs={12} sm={4}>
+              <Grid item xs={12} sm={6} md={3}>
+                <Paper variant="outlined" sx={snapshotCardSx}>
+                  <Typography variant="caption" color="text.secondary">
+                    Total Students
+                  </Typography>
+                  <Typography variant="h5" fontWeight={800}>
+                    {students.length}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Active population.
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
                 <Paper
                   variant="outlined"
                   sx={{
-                    p: 1.6,
-                    borderRadius: 2.5,
-                    bgcolor: "rgba(255,255,255,0.7)",
-                    backdropFilter: "blur(6px)",
+                    ...snapshotCardSx,
+                    borderColor: alpha(theme.palette.warning.main, isDark ? 0.45 : 0.35),
+                    bgcolor: alpha(theme.palette.warning.light, isDark ? 0.14 : 0.2),
+                  }}
+                >
+                  <Typography variant="caption" color="text.secondary">
+                    Predictions Pending
+                  </Typography>
+                  <Typography variant="h5" fontWeight={800}>
+                    {pendingPredictionCount}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {predictedCount} already predicted.
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    ...snapshotCardSx,
+                    borderColor: alpha(theme.palette.error.main, isDark ? 0.4 : 0.3),
+                    bgcolor: alpha(theme.palette.error.light, isDark ? 0.12 : 0.18),
                   }}
                 >
                   <Typography variant="caption" color="text.secondary">
                     High Risk Students
                   </Typography>
-                  <Typography fontWeight={700}>
+                  <Typography variant="h5" fontWeight={800}>
                     {highRisk}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Immediate outreach focus.
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    ...snapshotCardSx,
+                    borderColor: alpha(theme.palette.info.main, isDark ? 0.4 : 0.3),
+                    bgcolor: alpha(theme.palette.info.light, isDark ? 0.12 : 0.18),
+                  }}
+                >
+                  <Typography variant="caption" color="text.secondary">
+                    Risk Mix
+                  </Typography>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" mt={0.8}>
+                    <Chip size="small" label={`High ${highRisk}`} color="error" variant="outlined" />
+                    <Chip size="small" label={`Med ${mediumRisk}`} color="warning" variant="outlined" />
+                    <Chip size="small" label={`Low ${lowRisk}`} color="success" variant="outlined" />
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+                    Distribution across all faculties.
                   </Typography>
                 </Paper>
               </Grid>
@@ -1472,16 +1865,88 @@ const isStudent = role === "student";
           </Paper>
 
           <Paper sx={{ p: 3, mb: 4 }}>
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={2}
+              alignItems={{ xs: "flex-start", md: "center" }}
+              mb={2}
+            >
+              <Box sx={{ flex: 1 }}>
+                <Typography variant="overline" sx={{ letterSpacing: 2.5, color: "text.secondary" }}>
+                  Student Visuals
+                </Typography>
+                <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                  Search to view a student's full graphical status
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Enter a name or register number to load detailed charts.
+                </Typography>
+              </Box>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ minWidth: { xs: "100%", md: 420 } }}>
+                <TextField
+                  label="Search student (name or reg no)"
+                  value={adminSearchQuery}
+                  onChange={(event) => setAdminSearchQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      setAdminSearchTerm(adminSearchQuery.trim());
+                    }
+                  }}
+                  sx={{ flex: 1, minWidth: { xs: "100%", sm: 260 } }}
+                />
+                <Stack direction="row" spacing={1} justifyContent="flex-end">
+                  <Button
+                    variant="contained"
+                    onClick={() => setAdminSearchTerm(adminSearchQuery.trim())}
+                    disabled={adminSearchQuery.trim() === adminSearchTerm.trim()}
+                  >
+                    Apply
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    onClick={() => {
+                      setAdminSearchQuery("");
+                      setAdminSearchTerm("");
+                    }}
+                    disabled={!adminSearchQuery.trim() && !adminSearchTerm.trim()}
+                  >
+                    Clear
+                  </Button>
+                </Stack>
+              </Stack>
+            </Stack>
+
+            {!normalizedAdminQuery && (
+              <Alert severity="info">
+                Search and click Apply to view a student's full graphical status.
+              </Alert>
+            )}
+
+            {normalizedAdminQuery && filteredAdminStudents.length === 0 && (
+              <Alert severity="warning">
+                No students match that search. Try a different name or register number.
+              </Alert>
+            )}
+
+            {normalizedAdminQuery && filteredAdminStudents.length > 1 && (
+              <Alert severity="info">
+                Multiple students match. Refine your search to a single student to view charts.
+              </Alert>
+            )}
+
+            {selectedAdminStudent && (
+              <Box mt={2}>
+                <StudentReportCharts student={selectedAdminStudent} />
+              </Box>
+            )}
+          </Paper>
+
+          <Paper sx={{ p: 3, mb: 4 }}>
             <Typography variant="h6" mb={2}>🧾 Student Records</Typography>
             <Stack direction={{ xs: "column", md: "row" }} spacing={2} mb={2}>
-              <TextField
-                label="Search student (name or reg no)"
-                value={adminSearchQuery}
-                onChange={(event) => setAdminSearchQuery(event.target.value)}
-                sx={{ minWidth: { md: 320 } }}
-              />
               <Typography variant="body2" color="text.secondary" sx={{ alignSelf: "center" }}>
-                Showing {filteredAdminStudents.length} student(s)
+                Search above and click Apply to filter. Showing {filteredAdminStudents.length} student(s).
               </Typography>
             </Stack>
             <TableContainer component={Paper}>

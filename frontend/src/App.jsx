@@ -1,8 +1,10 @@
-import React, { useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { CssBaseline } from "@mui/material";
+import { Box, Button, CssBaseline } from "@mui/material";
+import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
+import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 import { ThemeProvider } from "@mui/material/styles";
-import theme from "./styles/theme";
+import getTheme from "./styles/theme";
 
 // Components & Pages
 import Navbar from "./components/Navbar";
@@ -15,6 +17,7 @@ import LoginPage from "./pages/LoginPage";
 import FacultyExports from "./pages/FacultyExports";
 import FacultyAlerts from "./pages/FacultyAlerts";
 import StudentAlerts from "./pages/StudentAlerts";
+import MyReport from "./pages/MyReport";
 import { RoleProvider, useRole } from "./context/RoleContext";
 
 const RoleRoute = ({ allowedRoles, element }) => {
@@ -43,13 +46,34 @@ const RoleDashboard = ({ roleName }) => {
   return <Dashboard />;
 };
 
-const AppLayout = () => {
+const AppLayout = ({ themeMode, onToggleTheme }) => {
   const location = useLocation();
   const hideNavbar = location.pathname === "/login";
 
   return (
     <>
-      {!hideNavbar && <Navbar />}
+      {!hideNavbar && <Navbar themeMode={themeMode} onToggleTheme={onToggleTheme} />}
+      {hideNavbar && (
+        <Box sx={{ position: "fixed", top: 16, right: 16, zIndex: 1300 }}>
+          <Button
+            variant="contained"
+            onClick={onToggleTheme}
+            startIcon={themeMode === "dark" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />}
+            sx={{
+              textTransform: "none",
+              borderRadius: 999,
+              px: 2.5,
+              boxShadow: "0 14px 26px rgba(15, 23, 42, 0.25)",
+              background:
+                themeMode === "dark"
+                  ? "linear-gradient(120deg, #38bdf8 0%, #0ea5e9 100%)"
+                  : "linear-gradient(120deg, #1e293b 0%, #0f172a 100%)",
+            }}
+          >
+            {themeMode === "dark" ? "Light Mode" : "Dark Mode"}
+          </Button>
+        </Box>
+      )}
       <Routes>
         {/* Redirect root to dashboard */}
         <Route path="/" element={<Navigate to="/login" />} />
@@ -63,6 +87,10 @@ const AppLayout = () => {
         <Route
           path="/student/alerts"
           element={<RoleRoute allowedRoles={["student"]} element={<StudentAlerts />} />}
+        />
+        <Route
+          path="/student/report"
+          element={<RoleRoute allowedRoles={["student"]} element={<MyReport />} />}
         />
 
         {/* Add / Edit Student */}
@@ -103,12 +131,52 @@ const AppLayout = () => {
 };
 
 const App = () => {
+  const [themeMode, setThemeMode] = useState(() => {
+    if (typeof window === "undefined") return "light";
+    return localStorage.getItem("dropoutcopilot.theme") || "light";
+  });
+  const toggleTheme = useCallback(() => {
+    setThemeMode((prev) => {
+      const next = prev === "light" ? "dark" : "light";
+      if (typeof window !== "undefined") {
+        localStorage.setItem("dropoutcopilot.theme", next);
+      }
+      return next;
+    });
+  }, []);
+  const theme = useMemo(() => getTheme(themeMode), [themeMode]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    root.setAttribute("data-theme", themeMode);
+    root.style.setProperty("--app-bg", theme.palette.background.default);
+    root.style.setProperty("--app-text", theme.palette.text.primary);
+    root.style.setProperty("--app-muted", theme.palette.text.secondary);
+    root.style.setProperty("--app-surface", theme.palette.background.paper);
+    root.style.setProperty("--app-border", theme.palette.divider);
+    root.style.setProperty(
+      "--app-card-shadow",
+      themeMode === "dark"
+        ? "0 14px 30px rgba(0,0,0,0.45)"
+        : "0 4px 12px rgba(15,23,42,0.08)"
+    );
+    root.style.setProperty(
+      "--app-table-head-bg",
+      themeMode === "dark" ? "#1e293b" : "#2563eb"
+    );
+    root.style.setProperty(
+      "--app-table-head-text",
+      themeMode === "dark" ? "#e2e8f0" : "#ffffff"
+    );
+  }, [theme, themeMode]);
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <RoleProvider>
         <Router>
-          <AppLayout />
+          <AppLayout themeMode={themeMode} onToggleTheme={toggleTheme} />
         </Router>
       </RoleProvider>
     </ThemeProvider>

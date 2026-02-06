@@ -1,8 +1,382 @@
 // routes/counselling.js
 const router = require("express").Router();
 const pool = require("../db"); // PostgreSQL connection
+const axios = require("axios");
+let openaiClientPromise;
+
+const getOpenAIClient = async () => {
+  if (openaiClientPromise) return openaiClientPromise;
+  openaiClientPromise = import("openai").then((module) => {
+    const OpenAI = module.default || module;
+    return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  });
+  return openaiClientPromise;
+};
+
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4.1";
+const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1:8b";
+const MCP_SERVER_URL = process.env.MCP_SERVER_URL || "http://localhost:8787/mcp";
+const MCP_SERVER_LABEL = process.env.MCP_SERVER_LABEL || "counselling";
 
 const normalizeFacultyId = (value) => (value || "").trim().toLowerCase();
+const AI_CACHE_TTL_MS = Number.parseInt(
+  process.env.COUNSELLING_AI_CACHE_TTL_MS || "900000",
+  10
+);
+const aiCounsellingCache = new Map();
+
+const toNumber = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const toPercent = (value) => {
+  const num = toNumber(value);
+  if (num === null) return null;
+  return num > 1 ? Math.round(num) : Math.round(num * 100);
+};
+
+const getTrend = (historyRows = []) => {
+  if (!Array.isArray(historyRows) || historyRows.length < 2) {
+    return { trend: "STABLE", delta: null };
+  }
+  const first = toNumber(historyRows[0]?.dropout_risk);
+  const last = toNumber(historyRows[historyRows.length - 1]?.dropout_risk);
+  if (first === null || last === null) return { trend: "STABLE", delta: null };
+  const delta = Number(((last - first) * 100).toFixed(1));
+  if (delta >= 5) return { trend: "RISING", delta };
+  if (delta <= -5) return { trend: "IMPROVING", delta };
+  return { trend: "STABLE", delta };
+};
+
+const buildRuleBasedCounselling = (payload) => {
+  const {
+    risk_level,
+    risk_percent,
+    risk_trend,
+    attendance,
+    cgpa,
+    arrear_count,
+    fees_paid,
+    disciplinary_issues,
+  } = payload;
+
+  const level = String(risk_level || "UNKNOWN").toUpperCase();
+  const riskPct = toNumber(risk_percent);
+  const trend = String(risk_trend || "STABLE").toUpperCase();
+  const hasPrediction = (level && level !== "UNKNOWN") || riskPct !== null;
+
+  const isHigh = hasPrediction && (level === "HIGH" || (riskPct !== null && riskPct >= 70));
+  const isMedium = hasPrediction && (level === "MEDIUM" || (riskPct !== null && riskPct >= 40));
+  const urgency = !hasPrediction ? "PENDING" : isHigh ? "HIGH" : isMedium ? "MEDIUM" : "LOW";
+
+  const recommendations = [];
+  const questions = [];
+
+  if (hasPrediction && trend === "RISING") {
+    recommendations.push("Schedule a check-in with your faculty advisor within 7 days.");
+    questions.push("Are there recent changes affecting your study routine?");
+  }
+  if (hasPrediction && attendance !== null && attendance < 75) {
+    recommendations.push("Create an attendance recovery plan (target 80%+ this month).");
+    questions.push("What are the main reasons behind missed classes?");
+  }
+  if (hasPrediction && cgpa !== null && cgpa < 6.5) {
+    recommendations.push("Enroll in subject tutoring for your lowest-performing course.");
+    questions.push("Which topics feel most challenging right now?");
+  }
+  if (hasPrediction && toNumber(arrear_count) > 0) {
+    recommendations.push("Prioritize clearing arrears with a weekly study schedule.");
+    questions.push("Which arrear subject needs the most support?");
+  }
+  if (hasPrediction && fees_paid === false) {
+    recommendations.push("Contact the finance office for a payment plan or fee support.");
+    questions.push("Do you need help connecting with the finance team?");
+  }
+  if (hasPrediction && toNumber(disciplinary_issues) > 0) {
+    recommendations.push("Book a wellbeing session to discuss support strategies.");
+    questions.push("Would you like help with behavioural or personal support resources?");
+  }
+
+  if (!hasPrediction) {
+    recommendations.push("Request a new prediction to unlock personalized guidance.");
+    questions.push("Would you like help requesting a prediction from your faculty?");
+  } else if (recommendations.length === 0) {
+    recommendations.push("Maintain your current study routine and review progress monthly.");
+    questions.push("Is there any area where you’d like extra guidance?");
+  }
+
+  const summary = !hasPrediction
+    ? "Prediction not available yet. Run a prediction to generate personalized guidance."
+    : isHigh
+      ? "Risk is high. Immediate support and a structured plan are recommended."
+      : isMedium
+        ? "Risk is moderate. Focus on consistent attendance and study habits."
+        : "Risk appears low. Continue steady progress and monitor monthly.";
+
+  const supportMessage = !hasPrediction
+    ? "Once a prediction is generated, your guidance will appear here."
+    : isHigh
+      ? "You’re not alone — support is available. Let’s build a recovery plan together."
+      : isMedium
+        ? "You’re close to a strong track. A few adjustments can make a big difference."
+        : "Great momentum. Keep it steady and ask for help early if needed.";
+
+  return {
+    summary,
+    urgency,
+    recommendations,
+    support_message: supportMessage,
+    follow_up_questions: questions.slice(0, 3),
+  };
+};
+
+const buildRuleBasedChatResponse = (payload, question) => {
+  const base = buildRuleBasedCounselling(payload);
+  const q = String(question || "").toLowerCase();
+  const attendance = toNumber(payload.attendance);
+  const cgpa = toNumber(payload.cgpa);
+  const riskPercent = toNumber(payload.risk_percent);
+
+  let focus = "";
+  if (q.includes("attendance")) {
+    focus = Number.isFinite(attendance)
+      ? `Your attendance is ${attendance}%. Aim for 80%+ to stay on track.`
+      : "Attendance data is not available yet. Ask your faculty to update it.";
+  } else if (q.includes("cgpa") || q.includes("gpa")) {
+    focus = Number.isFinite(cgpa)
+      ? `Your CGPA is ${cgpa}. Focus on your lowest-performing subjects first.`
+      : "CGPA data is not available yet. Ask your faculty to update it.";
+  } else if (q.includes("risk") || q.includes("dropout")) {
+    focus = Number.isFinite(riskPercent)
+      ? `Your current dropout risk is ${riskPercent}%. Lets focus on attendance and study habits.`
+      : "Risk data is not available yet. Request a prediction from your faculty.";
+  } else if (q.includes("fees")) {
+    focus = "If fees are a concern, contact the finance office to explore payment plans.";
+  } else if (q.includes("arrear") || q.includes("backlog")) {
+    focus = "Prioritize clearing arrears with a weekly study schedule and targeted tutoring.";
+  } else if (q.includes("discipline") || q.includes("behav")) {
+    focus = "Consider a wellbeing session to address behavioral or personal support needs.";
+  } else if (q.includes("stress") || q.includes("anxiety") || q.includes("mental")) {
+    focus = "Its okay to ask for help. Reach out to a counselor or trusted faculty member.";
+  }
+
+  const reply = [
+    base.summary,
+    focus,
+    base.support_message,
+  ].filter(Boolean).join(" ");
+
+  return {
+    reply,
+    recommendations: base.recommendations,
+    follow_up_questions: base.follow_up_questions,
+    urgency: base.urgency,
+  };
+};
+
+const formatValue = (value, fallback = "unknown") => {
+  if (value === null || value === undefined || value === "") return fallback;
+  return String(value);
+};
+
+const formatBoolean = (value) => {
+  if (value === null || value === undefined) return "unknown";
+  return value ? "yes" : "no";
+};
+
+const buildChatContext = (payload) => {
+  const attendance = Number.isFinite(payload.attendance) ? `${payload.attendance}%` : "unknown";
+  const cgpa = Number.isFinite(payload.cgpa) ? String(payload.cgpa) : "unknown";
+  const arrears = Number.isFinite(payload.arrear_count)
+    ? String(payload.arrear_count)
+    : "unknown";
+  const riskPercent = Number.isFinite(payload.risk_percent)
+    ? `${payload.risk_percent}%`
+    : "unknown";
+  const trendDelta = Number.isFinite(payload.trend_delta)
+    ? `${payload.trend_delta}%`
+    : "unknown";
+
+  return [
+    `risk_level: ${formatValue(payload.risk_level, "UNKNOWN")}`,
+    `risk_percent: ${riskPercent}`,
+    `risk_trend: ${formatValue(payload.risk_trend, "UNKNOWN")}`,
+    `trend_delta: ${trendDelta}`,
+    `attendance: ${attendance}`,
+    `cgpa: ${cgpa}`,
+    `arrear_count: ${arrears}`,
+    `fees_paid: ${formatBoolean(payload.fees_paid)}`,
+    `disciplinary_issues: ${formatValue(payload.disciplinary_issues)}`,
+    `last_prediction_at: ${formatValue(payload.last_prediction_at)}`,
+    `year: ${formatValue(payload.context?.year)}`,
+    `semester: ${formatValue(payload.context?.semester)}`,
+  ].join("\n");
+};
+
+const buildExplanationSystemPrompt = (safeContext) =>
+  "You are a student success counsellor. Provide an empathetic explanation only. " +
+  "Do not give recommendations, action steps, or questions. Do not use bullet points. " +
+  "Use the student context provided. If data is missing, say so plainly. " +
+  "Answer in 3-4 sentences." +
+  `\n\nStudent context:\n${safeContext}`;
+
+const normalizeBaseUrl = (value) => String(value || "").replace(/\/$/, "");
+
+const streamOllamaExplanation = async ({ systemPrompt, question, onToken }) => {
+  const url = `${normalizeBaseUrl(OLLAMA_BASE_URL)}/api/generate`;
+  const prompt = `${systemPrompt}\n\nQuestion: ${question}`;
+  const response = await axios.post(
+    url,
+    { model: OLLAMA_MODEL, prompt, stream: true },
+    { responseType: "stream" }
+  );
+
+  const stream = response.data;
+
+  const done = new Promise((resolve, reject) => {
+    let buffer = "";
+
+    const cleanup = () => {
+      stream.removeListener("data", onData);
+      stream.removeListener("error", onError);
+      stream.removeListener("end", onEnd);
+    };
+
+    const onData = (chunk) => {
+      buffer += chunk.toString("utf8");
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let data;
+        try {
+          data = JSON.parse(trimmed);
+        } catch (err) {
+          continue;
+        }
+        if (data?.response) {
+          onToken(String(data.response));
+        }
+        if (data?.done) {
+          cleanup();
+          resolve();
+        }
+      }
+    };
+
+    const onError = (err) => {
+      cleanup();
+      reject(err);
+    };
+
+    const onEnd = () => {
+      cleanup();
+      resolve();
+    };
+
+    stream.on("data", onData);
+    stream.on("error", onError);
+    stream.on("end", onEnd);
+  });
+
+  return { stream, done };
+};
+const callMcpChat = async ({ student_id, question, chat_history }) => {
+  const enabled = String(process.env.MCP_ENABLED || "").toLowerCase() === "true";
+  const mcpUrl = process.env.MCP_URL || process.env.MCP_SERVER_URL;
+  if (!enabled || !mcpUrl) return null;
+  const apiKey = process.env.MCP_API_KEY;
+  const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+
+  try {
+    const startedAt = Date.now();
+    const response = await axios.post(
+      mcpUrl,
+      {
+        tool: "counselling_chat",
+        input: { student_id, question, chat_history },
+      },
+      { headers, timeout: 15000 }
+    );
+    const durationMs = Date.now() - startedAt;
+    const data = response.data || null;
+    const sizeBytes = JSON.stringify(data || {}).length;
+    return {
+      data,
+      meta: {
+        latency_ms: durationMs,
+        response_bytes: sizeBytes,
+      },
+    };
+  } catch (err) {
+    console.error("❌ MCP Chat Error:", err.message);
+    return null;
+  }
+};
+
+const callMcpCounselling = async (payload) => {
+  const enabled = String(process.env.MCP_ENABLED || "").toLowerCase() === "true";
+  const mcpUrl = process.env.MCP_URL;
+  if (!enabled || !mcpUrl) return null;
+  const apiKey = process.env.MCP_API_KEY;
+  const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+
+  try {
+    const startedAt = Date.now();
+    const response = await axios.post(
+      mcpUrl,
+      {
+        tool: "counselling.generate",
+        input: payload,
+      },
+      { headers, timeout: 15000 }
+    );
+    const durationMs = Date.now() - startedAt;
+    const data = response.data || null;
+    const usage = data?.usage || data?.token_usage || null;
+    const sizeBytes = JSON.stringify(data || {}).length;
+    console.log(
+      `🧠 MCP counselling duration_ms=${durationMs} size_bytes=${sizeBytes}${
+        usage ? ` usage=${JSON.stringify(usage)}` : ""
+      }`
+    );
+    return {
+      data,
+      meta: {
+        latency_ms: durationMs,
+        response_bytes: sizeBytes,
+        usage,
+      },
+    };
+  } catch (err) {
+    console.error("❌ MCP Counselling Error:", err.message);
+    return null;
+  }
+};
+
+const getCachedCounselling = (studentId) => {
+  const key = String(studentId);
+  const entry = aiCounsellingCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    aiCounsellingCache.delete(key);
+    return null;
+  }
+  return entry;
+};
+
+const setCachedCounselling = (studentId, data) => {
+  const key = String(studentId);
+  const createdAt = Date.now();
+  aiCounsellingCache.set(key, {
+    data,
+    createdAt,
+    expiresAt: createdAt + AI_CACHE_TTL_MS,
+  });
+};
 
 // ================= BOOK COUNSELLING REQUEST =================
 router.post("/book", async (req, res) => {
@@ -135,4 +509,391 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+// ================= AI COUNSELLING INSIGHTS =================
+router.post("/ai", async (req, res) => {
+  try {
+    const { student_id, force } = req.body;
+    const id = Number(student_id);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ error: "student_id is required" });
+    }
+    if (!force) {
+      const cached = getCachedCounselling(id);
+      if (cached) {
+        return res.json({
+          ...cached.data,
+          metadata: {
+            ...(cached.data?.metadata || {}),
+            cache: "hit",
+            cached_at: new Date(cached.createdAt).toISOString(),
+          },
+        });
+      }
+    }
+
+    const studentResult = await pool.query(
+      `
+      SELECT s.id, s.name, s.register_number, s.year, s.semester, s.faculty_id,
+             a.attendance, a.cgpa, a.arrear_count, a.fees_paid, a.disciplinary_issues,
+             a.dropout_risk AS risk_score,
+             a.dropout_flag AS dropout_prediction,
+             p.risk_level,
+             p.prediction_date
+      FROM students s
+      LEFT JOIN academic_records a ON s.id = a.student_id
+      LEFT JOIN predictions p ON s.id = p.student_id
+      WHERE s.id = $1
+      `,
+      [id]
+    );
+
+    if (!studentResult.rows.length) {
+      return res.status(404).json({ error: "Student not found" });
+    }
+
+    const historyResult = await pool.query(
+      `
+      SELECT dropout_risk, risk_level, predicted_at
+      FROM prediction_history
+      WHERE student_id = $1
+      ORDER BY predicted_at ASC
+      `,
+      [id]
+    );
+
+    const student = studentResult.rows[0];
+    const historyRows = historyResult.rows || [];
+    const lastHistory = historyRows[historyRows.length - 1] || null;
+    const riskScore = student.risk_score ?? lastHistory?.dropout_risk ?? null;
+    const riskLevel = student.risk_level ?? lastHistory?.risk_level ?? null;
+    const riskPercent = toPercent(riskScore);
+    const { trend, delta } = getTrend(historyRows);
+    const lastPredictionAt = student.prediction_date || lastHistory?.predicted_at || null;
+
+    const payload = {
+      student_id: student.id,
+      risk_level: riskLevel,
+      risk_percent: riskPercent,
+      risk_trend: trend,
+      trend_delta: delta,
+      attendance: toNumber(student.attendance),
+      cgpa: toNumber(student.cgpa),
+      arrear_count: toNumber(student.arrear_count),
+      fees_paid: student.fees_paid,
+      disciplinary_issues: toNumber(student.disciplinary_issues),
+      last_prediction_at: lastPredictionAt,
+      context: {
+        year: student.year,
+        semester: student.semester,
+        faculty_id: student.faculty_id,
+      },
+    };
+
+    const mcpResult = await callMcpCounselling(payload);
+    const mcpResponse = mcpResult?.data || null;
+    const baseInsights = buildRuleBasedCounselling(payload);
+
+    const response = {
+      ...baseInsights,
+      ...(mcpResponse && typeof mcpResponse === "object" ? mcpResponse : {}),
+      metadata: {
+        generated_at: new Date().toISOString(),
+        source: mcpResponse ? "mcp" : "rule",
+        cache: "miss",
+        ...(mcpResult?.meta ? { mcp: mcpResult.meta } : {}),
+      },
+    };
+
+    setCachedCounselling(id, response);
+    res.json(response);
+  } catch (err) {
+    console.error("❌ AI Counselling Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/chat/stream", async (req, res) => {
+  let upstream = null;
+  let ended = false;
+
+  const closeUpstream = () => {
+    if (upstream && !upstream.destroyed) {
+      upstream.destroy();
+    }
+  };
+
+  const finish = () => {
+    if (ended) return;
+    ended = true;
+    res.end();
+  };
+
+  req.on("close", () => {
+    closeUpstream();
+  });
+
+  res.setHeader("Content-Type", "application/x-ndjson");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  if (typeof res.flushHeaders === "function") {
+    res.flushHeaders();
+  }
+
+  const send = (payload) => {
+    if (res.writableEnded) return;
+    res.write(`${JSON.stringify(payload)}\n`);
+  };
+
+  try {
+    const { student_id, question } = req.body;
+    const id = Number(student_id);
+    const prompt = String(question || "").trim();
+
+    if (!Number.isInteger(id)) {
+      send({ error: "student_id is required" });
+      return finish();
+    }
+    if (!prompt) {
+      send({ error: "question is required" });
+      return finish();
+    }
+
+    const enabled = String(process.env.MCP_ENABLED || "").toLowerCase() === "true";
+    const mcpUrl = process.env.MCP_URL || process.env.MCP_SERVER_URL || MCP_SERVER_URL;
+    if (!enabled || !mcpUrl) {
+      send({ error: "MCP streaming is disabled." });
+      return finish();
+    }
+
+    const apiKey = process.env.MCP_API_KEY;
+    const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+    const streamUrl = `${normalizeBaseUrl(mcpUrl)}/chat/stream`;
+
+    const response = await axios.post(
+      streamUrl,
+      { student_id: id, question: prompt },
+      { headers, responseType: "stream", timeout: 30000 }
+    );
+
+    upstream = response.data;
+    let buffer = "";
+
+    upstream.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let data;
+        try {
+          data = JSON.parse(trimmed);
+        } catch (err) {
+          continue;
+        }
+        if (data?.token) {
+          send({ token: data.token });
+        }
+        if (data?.error) {
+          send({ error: data.error });
+          closeUpstream();
+          return finish();
+        }
+        if (data?.done) {
+          send({ done: true });
+          closeUpstream();
+          return finish();
+        }
+      }
+    });
+
+    upstream.on("error", (err) => {
+      send({ error: err.message || "Streaming failed" });
+      finish();
+    });
+
+    upstream.on("end", () => {
+      send({ done: true });
+      finish();
+    });
+  } catch (err) {
+    send({ error: err.message || "Streaming failed" });
+    finish();
+  } finally {
+    if (ended) {
+      closeUpstream();
+    }
+  }
+});
+// ================= AI COUNSELLING CHAT =================
+router.post("/chat", async (req, res) => {
+  try {
+    const { student_id, question } = req.body;
+    const id = Number(student_id);
+    const prompt = String(question || "").trim();
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ error: "student_id is required" });
+    }
+    if (!prompt) {
+      return res.status(400).json({ error: "question is required" });
+    }
+
+    const studentResult = await pool.query(
+      `
+      SELECT s.id, s.name, s.register_number, s.year, s.semester, s.faculty_id,
+             a.attendance, a.cgpa, a.arrear_count, a.fees_paid, a.disciplinary_issues,
+             a.dropout_risk AS risk_score,
+             a.dropout_flag AS dropout_prediction,
+             p.risk_level,
+             p.prediction_date
+      FROM students s
+      LEFT JOIN academic_records a ON s.id = a.student_id
+      LEFT JOIN predictions p ON s.id = p.student_id
+      WHERE s.id = $1
+      `,
+      [id]
+    );
+
+    if (!studentResult.rows.length) {
+      return res.status(404).json({ error: "Student not found" });
+    }
+
+    const historyResult = await pool.query(
+      `
+      SELECT dropout_risk, risk_level, predicted_at
+      FROM prediction_history
+      WHERE student_id = $1
+      ORDER BY predicted_at ASC
+      `,
+      [id]
+    );
+
+    const student = studentResult.rows[0];
+    const historyRows = historyResult.rows || [];
+    const lastHistory = historyRows[historyRows.length - 1] || null;
+    const riskScore = student.risk_score ?? lastHistory?.dropout_risk ?? null;
+    const riskLevel = student.risk_level ?? lastHistory?.risk_level ?? null;
+    const riskPercent = toPercent(riskScore);
+    const { trend, delta } = getTrend(historyRows);
+    const lastPredictionAt = student.prediction_date || lastHistory?.predicted_at || null;
+
+    const payload = {
+      student_id: student.id,
+      risk_level: riskLevel,
+      risk_percent: riskPercent,
+      risk_trend: trend,
+      trend_delta: delta,
+      attendance: toNumber(student.attendance),
+      cgpa: toNumber(student.cgpa),
+      arrear_count: toNumber(student.arrear_count),
+      fees_paid: student.fees_paid,
+      disciplinary_issues: toNumber(student.disciplinary_issues),
+      last_prediction_at: lastPredictionAt,
+      user_question: prompt,
+      context: {
+        year: student.year,
+        semester: student.semester,
+        faculty_id: student.faculty_id,
+      },
+    };
+
+    let reply = null;
+    let recommendations = null;
+    let follow_up_questions = null;
+    let urgency = null;
+    let source = "rule";
+    let meta = null;
+
+    const mcpChatResult = await callMcpChat({
+      student_id: id,
+      question: prompt,
+    });
+    const mcpData = mcpChatResult?.data || null;
+    const structured = mcpData?.structuredContent || mcpData?.structured_content || null;
+    const mcpReply =
+      structured?.reply ||
+      mcpData?.content?.[0]?.text ||
+      "";
+
+    if (mcpReply) {
+      reply = String(mcpReply).trim();
+      recommendations = structured?.recommendations || null;
+      follow_up_questions = structured?.follow_up_questions || null;
+      urgency = structured?.urgency || null;
+      source = structured?.metadata?.source
+        ? `mcp_${structured.metadata.source}`
+        : "mcp";
+      meta = structured?.metadata || mcpChatResult?.meta || null;
+    }
+
+    const hasOpenAIKey = Boolean(process.env.OPENAI_API_KEY);
+    if (!reply && hasOpenAIKey) {
+      try {
+        const client = await getOpenAIClient();
+        const context = buildChatContext(payload);
+        const safeContext = context.replace(/[\u0000-\u001F]/g, "");
+        const response = await client.responses.create({
+          model: OPENAI_MODEL,
+          temperature: 0.4,
+          max_output_tokens: 260,
+          input: [
+            {
+              role: "system",
+              content:
+                "You are a student success counsellor. Provide an empathetic explanation only. " +
+                "Do not give recommendations, action steps, or questions. Do not use bullet points. " +
+                "Use the student context provided. If data is missing, say so plainly. " +
+                "Answer in 3-4 sentences." +
+                `\n\nStudent context:\n${safeContext}`,
+            },
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+        });
+
+        reply =
+          response.output_text?.trim?.() ||
+          response.output?.[0]?.content?.[0]?.text?.trim?.() ||
+          "";
+        if (reply) {
+          source = "openai";
+        }
+      } catch (err) {
+        console.error("OpenAI chat error:", err.message);
+        meta = { error: err.message };
+      }
+    }
+
+    if (!reply) {
+      const rule = buildRuleBasedChatResponse(payload, prompt);
+      reply = rule.reply;
+      recommendations = rule.recommendations;
+      follow_up_questions = rule.follow_up_questions;
+      urgency = rule.urgency;
+    }
+
+    res.json({
+      reply,
+      recommendations,
+      follow_up_questions,
+      urgency,
+      metadata: {
+        generated_at: new Date().toISOString(),
+        source,
+        ...(meta ? { mcp: meta } : {}),
+      },
+    });
+  } catch (err) {
+    console.error("❌ Counselling Chat Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
+
+
+

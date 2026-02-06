@@ -1,11 +1,14 @@
 // server.js
 require("dotenv").config();
 const express = require("express");
+const http = require("http");
 const cors = require("cors");
+const WebSocket = require("ws");
 const pool = require("./db");
 const axios = require("axios");
 
 const app = express();
+const server = http.createServer(app);
 app.use(
   cors({
     origin: process.env.CORS_ORIGIN || "*",
@@ -24,6 +27,12 @@ app.use((err, req, res, next) => {
 
 const ML_API_URL = process.env.ML_API_URL || "http://127.0.0.1:8000";
 const PORT = process.env.PORT || 4000;
+const CHAT_WS_PATH = "/counselling/chat/ws";
+const normalizeBaseUrl = (value) => String(value || "").replace(/\/$/, "");
+const BULK_IMPORT_LIMIT = Number.parseInt(
+  process.env.BULK_IMPORT_LIMIT || "500",
+  10
+);
 
 const normalizeFacultyId = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -33,10 +42,30 @@ const normalizeFeesPaid = (value) => {
   if (typeof value === "number") return value === 1;
   if (typeof value === "string") {
     const normalized = value.trim().toLowerCase();
+    if (["paid", "settled"].includes(normalized)) return true;
+    if (["unpaid", "due"].includes(normalized)) return false;
     if (["1", "true", "yes", "y"].includes(normalized)) return true;
     if (["0", "false", "no", "n"].includes(normalized)) return false;
   }
   return null;
+};
+
+const toNumberOrNull = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const resetPredictionForStudent = async (studentId) => {
+  await pool.query(
+    `
+    UPDATE academic_records
+    SET dropout_risk = NULL, dropout_flag = NULL
+    WHERE student_id = $1
+    `,
+    [studentId]
+  );
+  await pool.query("DELETE FROM predictions WHERE student_id = $1", [studentId]);
 };
 
 // ================= LOGGER =================
@@ -261,6 +290,29 @@ app.get("/students/:id/full", async (req, res) => {
   }
 });
 
+// ================= STUDENT PREDICTION HISTORY =================
+app.get("/students/:id/history", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ error: "Invalid student id." });
+    }
+    const result = await pool.query(
+      `
+      SELECT dropout_risk, risk_level, predicted_at
+      FROM prediction_history
+      WHERE student_id = $1
+      ORDER BY predicted_at ASC
+      `,
+      [id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET student history ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 // ================= ADD STUDENT =================
@@ -334,6 +386,130 @@ app.post("/students", async (req, res) => {
   }
 });
 
+// ================= BULK ADD STUDENTS =================
+app.post("/students/bulk", async (req, res) => {
+  const { students, force_faculty_id } = req.body || {};
+  if (!Array.isArray(students) || students.length === 0) {
+    return res.status(400).json({ error: "students array is required" });
+  }
+  if (students.length > BULK_IMPORT_LIMIT) {
+    return res.status(413).json({ error: `Bulk import limit is ${BULK_IMPORT_LIMIT} rows.` });
+  }
+
+  const forcedFacultyId = normalizeFacultyId(force_faculty_id);
+  const results = [];
+  let created = 0;
+  let failed = 0;
+
+  const client = await pool.connect();
+  try {
+    for (let i = 0; i < students.length; i += 1) {
+      const row = students[i] || {};
+      const name = String(row.name || "").trim();
+      const register_number = String(row.register_number || "").trim();
+      const year = toNumberOrNull(row.year);
+      const semester = toNumberOrNull(row.semester);
+      const attendance = toNumberOrNull(row.attendance);
+      const cgpa = toNumberOrNull(row.cgpa);
+      const arrear_count = toNumberOrNull(row.arrear_count);
+      const fees_paid = normalizeFeesPaid(row.fees_paid);
+      const disciplinary_issues = toNumberOrNull(row.disciplinary_issues);
+      const phone_number = row.phone_number ? String(row.phone_number).trim() : null;
+      const faculty_id = forcedFacultyId || normalizeFacultyId(row.faculty_id);
+
+      const missing = [];
+      if (!name) missing.push("name");
+      if (!register_number) missing.push("register_number");
+      if (year === null) missing.push("year");
+      if (semester === null) missing.push("semester");
+      if (attendance === null) missing.push("attendance");
+      if (cgpa === null) missing.push("cgpa");
+      if (arrear_count === null) missing.push("arrear_count");
+      if (fees_paid === null) missing.push("fees_paid");
+
+      if (missing.length > 0) {
+        failed += 1;
+        results.push({
+          index: i,
+          register_number,
+          status: "error",
+          error: `Missing or invalid: ${missing.join(", ")}`,
+        });
+        continue;
+      }
+
+      try {
+        await client.query("BEGIN");
+        const insertStudent = await client.query(
+          `
+          INSERT INTO students (name, register_number, year, semester, faculty_id, phone_number)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING id
+          `,
+          [name, register_number, year, semester, faculty_id || null, phone_number]
+        );
+        const studentId = insertStudent.rows[0].id;
+        await client.query(
+          `
+          INSERT INTO academic_records (
+            student_id,
+            attendance,
+            cgpa,
+            arrear_count,
+            fees_paid,
+            disciplinary_issues,
+            dropout_risk,
+            dropout_flag
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL)
+          `,
+          [
+            studentId,
+            attendance,
+            cgpa,
+            arrear_count,
+            fees_paid,
+            disciplinary_issues,
+          ]
+        );
+        await client.query("COMMIT");
+        created += 1;
+        results.push({
+          index: i,
+          register_number,
+          status: "success",
+          student_id: studentId,
+        });
+      } catch (err) {
+        await client.query("ROLLBACK");
+        failed += 1;
+        let message = err.message;
+        if (err.code === "23505") {
+          message = "Register number already exists.";
+        }
+        results.push({
+          index: i,
+          register_number,
+          status: "error",
+          error: message,
+        });
+      }
+    }
+
+    res.json({
+      total: students.length,
+      created,
+      failed,
+      results,
+    });
+  } catch (err) {
+    console.error("BULK ADD STUDENTS ERROR:", err.message);
+    res.status(500).json({ error: "Bulk import failed." });
+  } finally {
+    client.release();
+  }
+});
+
 // ================= UPDATE STUDENT =================
 app.put("/students/:id", async (req, res) => {
   try {
@@ -364,6 +540,8 @@ app.put("/students/:id", async (req, res) => {
       ]
     );
 
+    await resetPredictionForStudent(id);
+
     res.json({ message: "Student updated" });
   } catch (err) {
     console.error("UPDATE STUDENT ERROR:", err);
@@ -391,6 +569,8 @@ app.post("/academic", async (req, res) => {
       `,
       [student_id, attendance, cgpa, arrear_count, normalizedFeesPaid, disciplinary_issues]
     );
+
+    await resetPredictionForStudent(student_id);
 
     res.status(201).json({ message: "Academic record saved" });
   } catch (err) {
@@ -452,6 +632,8 @@ app.put("/academic/:student_id", async (req, res) => {
         [student_id, attendance, cgpa, arrear_count, normalizedFeesPaid, disciplinary_issues]
       );
     }
+
+    await resetPredictionForStudent(student_id);
 
     res.json({ message: "Academic Updated" });
   } catch (err) {
@@ -633,5 +815,140 @@ app.get("/students/risk/history", async (req, res) => {
 });
 
 
+// ================= WEBSOCKET CHAT STREAM =================
+const wsServer = new WebSocket.Server({ noServer: true });
+
+server.on("upgrade", (req, socket, head) => {
+  if (!req.url || !req.url.startsWith(CHAT_WS_PATH)) {
+    socket.destroy();
+    return;
+  }
+
+  wsServer.handleUpgrade(req, socket, head, (ws) => {
+    wsServer.emit("connection", ws, req);
+  });
+});
+
+wsServer.on("connection", (ws) => {
+  let upstream = null;
+  let buffer = "";
+  let activeRequestId = null;
+
+  const send = (payload) => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(payload));
+  };
+
+  const closeUpstream = () => {
+    if (upstream && !upstream.destroyed) {
+      upstream.destroy();
+    }
+    upstream = null;
+    buffer = "";
+  };
+
+  ws.on("close", closeUpstream);
+  ws.on("error", closeUpstream);
+
+  ws.on("message", async (raw) => {
+    let message;
+    try {
+      message = JSON.parse(raw.toString());
+    } catch (err) {
+      send({ type: "error", error: "Invalid JSON payload." });
+      return;
+    }
+
+    if (message?.type !== "chat") {
+      send({ type: "error", error: "Unsupported message type." });
+      return;
+    }
+
+    const requestId = String(message.request_id || Date.now());
+    activeRequestId = requestId;
+    closeUpstream();
+
+    const id = Number(message.student_id);
+    const prompt = String(message.question || "").trim();
+
+    if (!Number.isInteger(id)) {
+      send({ type: "error", error: "student_id is required", request_id: requestId });
+      return;
+    }
+    if (!prompt) {
+      send({ type: "error", error: "question is required", request_id: requestId });
+      return;
+    }
+
+    const enabled = String(process.env.MCP_ENABLED || "").toLowerCase() === "true";
+    const mcpUrl = process.env.MCP_URL || process.env.MCP_SERVER_URL;
+    if (!enabled || !mcpUrl) {
+      send({ type: "error", error: "MCP streaming is disabled.", request_id: requestId });
+      return;
+    }
+
+    const apiKey = process.env.MCP_API_KEY;
+    const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+    const streamUrl = `${normalizeBaseUrl(mcpUrl)}/chat/stream`;
+
+    try {
+      const response = await axios.post(
+        streamUrl,
+        { student_id: id, question: prompt },
+        { headers, responseType: "stream", timeout: 30000 }
+      );
+
+      upstream = response.data;
+      buffer = "";
+
+      upstream.on("data", (chunk) => {
+        if (requestId !== activeRequestId) return;
+        buffer += chunk.toString("utf8");
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          let data;
+          try {
+            data = JSON.parse(trimmed);
+          } catch (err) {
+            continue;
+          }
+          if (data?.token) {
+            send({ type: "token", token: data.token, request_id: requestId });
+          }
+          if (data?.error) {
+            send({ type: "error", error: data.error, request_id: requestId });
+            closeUpstream();
+            return;
+          }
+          if (data?.done) {
+            send({ type: "done", request_id: requestId });
+            closeUpstream();
+            return;
+          }
+        }
+      });
+
+      upstream.on("error", (err) => {
+        send({ type: "error", error: err.message || "Streaming failed", request_id: requestId });
+        closeUpstream();
+      });
+
+      upstream.on("end", () => {
+        send({ type: "done", request_id: requestId });
+        closeUpstream();
+      });
+    } catch (err) {
+      send({ type: "error", error: err.message || "Streaming failed", request_id: requestId });
+      closeUpstream();
+    }
+  });
+});
+
 // ================= START SERVER =================
-app.listen(PORT, () => console.log(`✅ Backend running on http://localhost:${PORT}`));
+server.listen(PORT, () =>
+  console.log(`✅ Backend running on http://localhost:${PORT}`)
+);

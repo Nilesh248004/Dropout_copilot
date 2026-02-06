@@ -4,8 +4,9 @@
 body {
   margin: 0;
   font-family: 'Manrope', 'Space Grotesk', sans-serif;
-  background-color: #f5f7fa;
-  color: #333;
+  background-color: var(--app-bg, #f5f7fa);
+  color: var(--app-text, #0f172a);
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -22,9 +23,9 @@ button {
 }
 
 .card {
-  background: #fff;
+  background: var(--app-surface, #ffffff);
   border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  box-shadow: var(--app-card-shadow, 0 4px 12px rgba(0,0,0,0.05));
   padding: 16px;
   margin: 12px 0;
 }
@@ -41,6 +42,6 @@ button {
 }
 
 .MuiTableHead-root .MuiTableCell-root {
-  background-color: #1976d2 !important;
-  color: white !important;
+  background-color: var(--app-table-head-bg, #2563eb) !important;
+  color: var(--app-table-head-text, #ffffff) !important;
 }

@@ -1,5 +1,19 @@
-import React, { useEffect, useState } from "react";
-import { Container, Paper, Box, TextField, Button, Typography, Snackbar, Alert, MenuItem } from "@mui/material";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Container,
+  Paper,
+  Box,
+  TextField,
+  Button,
+  Typography,
+  Snackbar,
+  Alert,
+  MenuItem,
+  Divider,
+  Stack,
+  Chip,
+} from "@mui/material";
+import * as XLSX from "xlsx";
 import axios from "axios";
 import { API_BASE_URL } from "../config/api";
 import { useNavigate } from "react-router-dom";
@@ -23,12 +37,282 @@ const AddStudentPage = () => {
     disciplinary_issues: "",
   });
   const [loading, setLoading] = useState(false);
+  const [bulkFileName, setBulkFileName] = useState("");
+  const [bulkRows, setBulkRows] = useState([]);
+  const [bulkInvalidRows, setBulkInvalidRows] = useState([]);
+  const [bulkStatus, setBulkStatus] = useState(null);
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const fileInputRef = useRef(null);
 
   // Snackbar for feedback
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
 
+  const headerMap = useMemo(
+    () => ({
+      name: "name",
+      studentname: "name",
+      fullname: "name",
+      register: "register_number",
+      regno: "register_number",
+      regnumber: "register_number",
+      registernumber: "register_number",
+      studentid: "register_number",
+      year: "year",
+      semester: "semester",
+      sem: "semester",
+      faculty: "faculty_id",
+      facultyid: "faculty_id",
+      phone: "phone_number",
+      phonenumber: "phone_number",
+      mobile: "phone_number",
+      attendance: "attendance",
+      attendancepercent: "attendance",
+      cgpa: "cgpa",
+      gpa: "cgpa",
+      arrear: "arrear_count",
+      arrears: "arrear_count",
+      arrearcount: "arrear_count",
+      fees: "fees_paid",
+      feespaid: "fees_paid",
+      feesstatus: "fees_paid",
+      disciplinary: "disciplinary_issues",
+      disciplinaryissues: "disciplinary_issues",
+      discipline: "disciplinary_issues",
+    }),
+    []
+  );
+  const requiredColumns = useMemo(
+    () => [
+      "name",
+      "register_number",
+      "year",
+      "semester",
+      "attendance",
+      "cgpa",
+      "arrear_count",
+      "fees_paid",
+    ],
+    []
+  );
+
   const handleChange = (e) => {
     setStudent({ ...student, [e.target.name]: e.target.value });
+  };
+
+  const normalizeHeader = (value) =>
+    String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+
+  const toNumberOrNull = (value) => {
+    if (value === null || value === undefined || value === "") return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+
+  const normalizeFeesPaid = (value) => {
+    if (value === null || value === undefined || value === "") return null;
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value === 1;
+    const normalized = String(value).trim().toLowerCase();
+    if (["paid", "yes", "true", "1", "y"].includes(normalized)) return true;
+    if (["unpaid", "no", "false", "0", "n", "due"].includes(normalized)) return false;
+    return null;
+  };
+
+  const parseBulkRows = (rawRows) =>
+    rawRows.map((row, index) => {
+      const mapped = {};
+      Object.entries(row || {}).forEach(([key, value]) => {
+        const normalizedKey = normalizeHeader(key);
+        const mappedKey = headerMap[normalizedKey];
+        if (!mappedKey) return;
+        if (mapped[mappedKey] !== undefined && mapped[mappedKey] !== "") return;
+        mapped[mappedKey] = value;
+      });
+
+      const cleaned = {
+        name: String(mapped.name || "").trim(),
+        register_number: String(mapped.register_number || "").trim(),
+        year: toNumberOrNull(mapped.year),
+        semester: toNumberOrNull(mapped.semester),
+        faculty_id: mapped.faculty_id ? String(mapped.faculty_id).trim() : "",
+        phone_number: mapped.phone_number ? String(mapped.phone_number).trim() : "",
+        attendance: toNumberOrNull(mapped.attendance),
+        cgpa: toNumberOrNull(mapped.cgpa),
+        arrear_count: toNumberOrNull(mapped.arrear_count),
+        fees_paid: normalizeFeesPaid(mapped.fees_paid),
+        disciplinary_issues: toNumberOrNull(mapped.disciplinary_issues),
+      };
+
+      const missing = [];
+      if (!cleaned.name) missing.push("name");
+      if (!cleaned.register_number) missing.push("register_number");
+      if (cleaned.year === null) missing.push("year");
+      if (cleaned.semester === null) missing.push("semester");
+      if (cleaned.attendance === null) missing.push("attendance");
+      if (cleaned.cgpa === null) missing.push("cgpa");
+      if (cleaned.arrear_count === null) missing.push("arrear_count");
+      if (cleaned.fees_paid === null) missing.push("fees_paid");
+
+      return {
+        index,
+        row: cleaned,
+        issues: missing,
+      };
+    });
+
+  const handleBulkFile = async (file) => {
+    if (!file) return;
+    setBulkStatus(null);
+    setBulkRows([]);
+    setBulkInvalidRows([]);
+    setBulkFileName(file.name);
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) {
+        throw new Error("No worksheet found.");
+      }
+      const sheet = workbook.Sheets[sheetName];
+      const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      const headerRow = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" })[0] || [];
+      const mappedHeaders = new Set(
+        headerRow
+          .map((header) => headerMap[normalizeHeader(header)])
+          .filter(Boolean)
+      );
+      const missingHeaders = requiredColumns.filter(
+        (key) => !mappedHeaders.has(key)
+      );
+      if (missingHeaders.length > 0) {
+        setBulkStatus({
+          type: "error",
+          message: `Missing required columns: ${missingHeaders.join(", ")}`,
+        });
+        setBulkRows([]);
+        setBulkInvalidRows([]);
+        return;
+      }
+      if (!rawRows.length) {
+        throw new Error("No rows found in the file.");
+      }
+      const parsed = parseBulkRows(rawRows);
+      const validRows = parsed.filter((item) => item.issues.length === 0).map((item) => item.row);
+      const invalidRows = parsed.filter((item) => item.issues.length > 0);
+
+      setBulkRows(validRows);
+      setBulkInvalidRows(invalidRows);
+      if (!validRows.length) {
+        setBulkStatus({ type: "error", message: "No valid rows found. Check required fields." });
+      } else {
+        setBulkStatus({
+          type: "success",
+          message: `Loaded ${validRows.length} valid row(s).`,
+        });
+      }
+    } catch (err) {
+      setBulkStatus({ type: "error", message: err.message || "Unable to read file." });
+    }
+  };
+
+  const handleDragOver = (event) => {
+    event.preventDefault();
+    setIsDragActive(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragActive(false);
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    setIsDragActive(false);
+    const file = event.dataTransfer?.files?.[0];
+    if (file) {
+      handleBulkFile(file);
+    }
+  };
+
+  const handleFileChange = (event) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      handleBulkFile(file);
+    }
+  };
+
+  const uploadBulkStudents = async () => {
+    if (!bulkRows.length) {
+      setBulkStatus({ type: "error", message: "No valid rows to upload." });
+      return;
+    }
+    try {
+      setBulkUploading(true);
+      const forcedFacultyId = role === "faculty" ? normalizeFacultyId(facultyId) : "";
+      const payloadRows = bulkRows.map((row) => ({
+        ...row,
+        faculty_id: forcedFacultyId || row.faculty_id || "",
+      }));
+      const res = await axios.post(`${API_BASE_URL}/students/bulk`, {
+        students: payloadRows,
+        force_faculty_id: forcedFacultyId || null,
+      });
+      const created = res.data?.created || 0;
+      const failed = res.data?.failed || 0;
+      setBulkStatus({
+        type: failed ? "warning" : "success",
+        message: `Imported ${created} student(s).${failed ? ` ${failed} failed.` : ""}`,
+      });
+      if (!failed) {
+        setTimeout(() => navigate("/dashboard"), 1500);
+      }
+    } catch (err) {
+      setBulkStatus({
+        type: "error",
+        message: err.response?.data?.error || "Bulk import failed.",
+      });
+    } finally {
+      setBulkUploading(false);
+    }
+  };
+
+  const downloadTemplate = () => {
+    const headers = [
+      "name",
+      "register_number",
+      "year",
+      "semester",
+      "phone_number",
+      "attendance",
+      "cgpa",
+      "arrear_count",
+      "fees_paid",
+      "disciplinary_issues",
+    ];
+    const sample = [
+      "Asha Patel",
+      "STU001",
+      "2",
+      "4",
+      "9876543210",
+      "86",
+      "7.4",
+      "0",
+      "Paid",
+      "0",
+    ];
+    const csv = [headers, sample]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "student_import_template.csv";
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   useEffect(() => {
@@ -36,6 +320,7 @@ const AddStudentPage = () => {
       setStudent((prev) => ({ ...prev, faculty_id: facultyId || "" }));
     }
   }, [role, facultyId]);
+
 
   const handleSubmit = async () => {
     const {
@@ -238,6 +523,86 @@ const AddStudentPage = () => {
             Cancel
           </Button>
         </Box>
+
+        <Divider sx={{ my: 3 }} />
+
+        <Stack spacing={2}>
+          <Box>
+            <Typography variant="h6">Bulk Import (Excel/CSV)</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Drag and drop an Excel/CSV file to add multiple students at once. Required columns:
+              name, register_number, year, semester, attendance, cgpa, arrear_count, fees_paid.
+            </Typography>
+          </Box>
+
+          <Box
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            sx={{
+              p: 3,
+              borderRadius: 2.5,
+              border: "2px dashed",
+              borderColor: isDragActive ? "primary.main" : "rgba(148, 163, 184, 0.6)",
+              bgcolor: isDragActive ? "rgba(59, 130, 246, 0.08)" : "rgba(148, 163, 184, 0.08)",
+              textAlign: "center",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              hidden
+              onChange={handleFileChange}
+            />
+            <Typography variant="subtitle1" fontWeight={600}>
+              Drop your file here or click to upload
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Supported: .xlsx, .xls, .csv
+            </Typography>
+            {bulkFileName && (
+              <Box mt={1}>
+                <Chip label={bulkFileName} variant="outlined" />
+              </Box>
+            )}
+          </Box>
+
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+            <Button variant="outlined" onClick={downloadTemplate}>
+              Download Template
+            </Button>
+            <Button
+              variant="contained"
+              onClick={uploadBulkStudents}
+              disabled={bulkUploading || bulkRows.length === 0}
+            >
+              {bulkUploading ? "Importing..." : "Import Students"}
+            </Button>
+            {role === "faculty" && (
+              <Chip
+                label={`Faculty ID locked: ${normalizeFacultyId(facultyId) || "N/A"}`}
+                color="info"
+                variant="outlined"
+                sx={{ alignSelf: { xs: "flex-start", sm: "center" } }}
+              />
+            )}
+          </Stack>
+
+          {bulkStatus && (
+            <Alert severity={bulkStatus.type}>{bulkStatus.message}</Alert>
+          )}
+
+          {bulkInvalidRows.length > 0 && (
+            <Alert severity="warning">
+              {bulkInvalidRows.length} row(s) skipped due to missing/invalid fields.
+              Example: Row {bulkInvalidRows[0].index + 2} missing {bulkInvalidRows[0].issues.join(", ")}.
+            </Alert>
+          )}
+
+        </Stack>
 
         {/* Snackbar for messages */}
         <Snackbar
