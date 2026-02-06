@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
   Chip,
   Container,
@@ -12,6 +13,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableContainer,
   TableHead,
   TableRow,
   Tooltip,
@@ -21,6 +23,7 @@ import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import VisibilityRoundedIcon from "@mui/icons-material/VisibilityRounded";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import axios from "axios";
+import { alpha, useTheme } from "@mui/material/styles";
 import { API_BASE_URL } from "../config/api";
 
 const formatBytes = (bytes) => {
@@ -69,11 +72,23 @@ const buildPreview = (text) => {
     return { headers: [], rows: [] };
   }
   const headers = parseCsvLine(lines[0]);
-  const rows = lines.slice(1, 6).map(parseCsvLine);
+  const rows = lines.slice(1).map(parseCsvLine);
   return { headers, rows };
 };
 
 const FacultyExports = () => {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === "dark";
+  const textPrimary = theme.palette.text.primary;
+  const textSecondary = theme.palette.text.secondary;
+  const surface = theme.palette.background.paper;
+  const borderSoft = alpha(textPrimary, isDark ? 0.2 : 0.12);
+  const panelShadow = isDark
+    ? "0 18px 45px rgba(0, 0, 0, 0.45)"
+    : "0 18px 40px rgba(15, 23, 42, 0.08)";
+  const headerGradient = isDark
+    ? "linear-gradient(135deg, rgba(15,23,42,0.95) 0%, rgba(30,41,59,0.85) 55%, rgba(14,116,144,0.2) 100%)"
+    : "linear-gradient(135deg, rgba(239,246,255,0.95) 0%, rgba(224,242,254,0.8) 55%, rgba(14,165,233,0.18) 100%)";
   const [exportsList, setExportsList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null);
@@ -172,13 +187,29 @@ const FacultyExports = () => {
         sx={{
           p: 3,
           mb: 3,
-          background:
-            "linear-gradient(120deg, rgba(30,64,175,0.15), rgba(56,189,248,0.1))",
-          border: "1px solid rgba(148,163,184,0.2)",
+          borderRadius: 4,
+          background: headerGradient,
+          border: `1px solid ${borderSoft}`,
+          boxShadow: panelShadow,
+          position: "relative",
+          overflow: "hidden",
+          "&::after": {
+            content: '""',
+            position: "absolute",
+            right: -80,
+            top: -120,
+            width: 220,
+            height: 220,
+            borderRadius: "50%",
+            background: `radial-gradient(circle, ${alpha(theme.palette.primary.main, 0.28)} 0%, transparent 70%)`,
+          },
         }}
       >
         <Stack spacing={1}>
-          <Typography variant="h4" fontWeight={700}>
+          <Typography variant="overline" sx={{ letterSpacing: 3, color: textSecondary }}>
+            Admin Workspace
+          </Typography>
+          <Typography variant="h4" fontWeight={800} sx={{ letterSpacing: -0.6 }}>
             Faculty Export Inbox
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -194,7 +225,23 @@ const FacultyExports = () => {
           { label: "Faculty Contributors", value: uniqueFaculty },
         ].map((stat) => (
           <Grid item xs={12} md={4} key={stat.label}>
-            <Paper sx={{ p: 2 }}>
+            <Paper
+              sx={{
+                p: 2.2,
+                borderRadius: 3,
+                border: `1px solid ${borderSoft}`,
+                boxShadow: panelShadow,
+                background: isDark
+                  ? `linear-gradient(140deg, ${alpha(theme.palette.primary.main, 0.18)} 0%, ${alpha(
+                      surface,
+                      0.9
+                    )} 60%)`
+                  : `linear-gradient(140deg, ${alpha(theme.palette.primary.main, 0.12)} 0%, ${alpha(
+                      surface,
+                      0.98
+                    )} 60%)`,
+              }}
+            >
               <Typography variant="caption" color="text.secondary">
                 {stat.label}
               </Typography>
@@ -206,7 +253,16 @@ const FacultyExports = () => {
         ))}
       </Grid>
 
-      <Paper sx={{ p: 2.5, mb: 3 }}>
+      <Paper
+        sx={{
+          p: 2.5,
+          mb: 3,
+          borderRadius: 3,
+          border: `1px solid ${borderSoft}`,
+          boxShadow: panelShadow,
+          bgcolor: alpha(surface, isDark ? 0.85 : 0.98),
+        }}
+      >
         <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
           <Button
             variant="outlined"
@@ -216,13 +272,12 @@ const FacultyExports = () => {
           >
             {loading ? "Loading..." : "Refresh List"}
           </Button>
-          {latestExport && (
-            <Chip
-              label={`Latest: ${latestExport.file_name}`}
-              color="primary"
-              sx={{ ml: { md: "auto" } }}
-            />
-          )}
+          <Stack direction="row" spacing={1} sx={{ ml: { md: "auto" } }} flexWrap="wrap">
+            <Chip label={`Showing all: ${exportsList.length}`} variant="outlined" />
+            {latestExport && (
+              <Chip label={`Latest: ${latestExport.file_name}`} color="primary" />
+            )}
+          </Stack>
         </Stack>
         {status && (
           <Alert severity={status.type} sx={{ mt: 2 }}>
@@ -233,82 +288,196 @@ const FacultyExports = () => {
 
       <Grid container spacing={3}>
         <Grid item xs={12} lg={7}>
-          <Paper sx={{ p: 2.5 }}>
-            <Typography variant="h6" mb={2}>
-              Received Exports
-            </Typography>
+          <Paper
+            sx={{
+              p: 2.5,
+              borderRadius: 3,
+              border: `1px solid ${borderSoft}`,
+              boxShadow: panelShadow,
+              bgcolor: alpha(surface, isDark ? 0.88 : 0.99),
+            }}
+          >
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              spacing={1.5}
+              alignItems={{ sm: "center" }}
+              mb={2}
+            >
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                  Received Exports
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  All faculty submissions, tracked and ready to review.
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={1} sx={{ ml: { sm: "auto" } }} flexWrap="wrap">
+                <Chip
+                  label={`${exportsList.length} total`}
+                  variant="outlined"
+                  sx={{ fontWeight: 600 }}
+                />
+                {latestExport && (
+                  <Chip
+                    label={`Latest: ${latestExport.file_name}`}
+                    color="primary"
+                    variant={isDark ? "outlined" : "filled"}
+                  />
+                )}
+              </Stack>
+            </Stack>
             {exportsList.length === 0 ? (
               <Alert severity="warning">No exports uploaded yet.</Alert>
             ) : (
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    {["File", "Faculty", "Rows", "Size", "Uploaded", "Actions"].map((header) => (
-                      <TableCell key={header} sx={{ fontWeight: 600 }}>
-                        {header}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {exportsList.map((item) => (
-                    <TableRow key={item.id} hover>
-                      <TableCell>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Typography>{item.file_name}</Typography>
-                          {latestExport?.id === item.id && (
-                            <Chip label="Latest" size="small" color="primary" />
-                          )}
-                        </Stack>
-                        <Typography variant="caption" color="text.secondary">
-                          {item.uploaded_by_email || "Unknown uploader"}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{item.faculty_id || "—"}</TableCell>
-                      <TableCell>{item.row_count ?? "—"}</TableCell>
-                      <TableCell>{formatBytes(item.file_size || 0)}</TableCell>
-                      <TableCell>{new Date(item.created_at).toLocaleString()}</TableCell>
-                      <TableCell>
-                        <Stack direction="row" spacing={1}>
-                          <Tooltip title="Preview">
-                            <span>
-                              <IconButton
-                                size="small"
-                                onClick={() => handlePreview(item)}
-                                disabled={previewLoadingId === item.id}
-                              >
-                                <VisibilityRoundedIcon fontSize="small" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                          <Tooltip title="Download CSV">
-                            <span>
-                              <IconButton
-                                size="small"
-                                onClick={() => handleDownload(item)}
-                                disabled={downloadingId === item.id}
-                              >
-                                <DownloadRoundedIcon fontSize="small" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        </Stack>
-                      </TableCell>
+              <TableContainer
+                sx={{
+                  maxHeight: 520,
+                  borderRadius: 2.5,
+                  border: `1px solid ${borderSoft}`,
+                }}
+              >
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow
+                      sx={{
+                        background: isDark
+                          ? "linear-gradient(90deg, rgba(30,41,59,0.95), rgba(15,23,42,0.85))"
+                          : "linear-gradient(90deg, rgba(226,232,240,0.9), rgba(241,245,249,0.7))",
+                      }}
+                    >
+                      {["File", "Faculty", "Rows", "Size", "Uploaded", "Actions"].map((header) => (
+                        <TableCell
+                          key={header}
+                          sx={{
+                            fontWeight: 700,
+                            color: textPrimary,
+                            borderBottom: `1px solid ${borderSoft}`,
+                          }}
+                        >
+                          {header}
+                        </TableCell>
+                      ))}
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHead>
+                  <TableBody>
+                    {exportsList.map((item, index) => (
+                      <TableRow
+                        key={item.id}
+                        hover
+                        sx={{
+                          backgroundColor: index % 2 === 0
+                            ? alpha(theme.palette.primary.main, isDark ? 0.08 : 0.05)
+                            : "transparent",
+                          transition: "all 0.2s ease",
+                          "&:hover": {
+                            backgroundColor: alpha(theme.palette.primary.main, isDark ? 0.16 : 0.1),
+                            boxShadow: `inset 0 0 0 1px ${alpha(
+                              theme.palette.primary.main,
+                              0.2
+                            )}`,
+                          },
+                        }}
+                      >
+                        <TableCell>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Typography sx={{ fontWeight: 600 }}>
+                              {item.file_name}
+                            </Typography>
+                            {latestExport?.id === item.id && (
+                              <Chip label="Latest" size="small" color="primary" />
+                            )}
+                          </Stack>
+                          <Typography variant="caption" color="text.secondary">
+                            {item.uploaded_by_email || "Unknown uploader"}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={item.faculty_id || "N/A"}
+                            size="small"
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={item.row_count ?? "N/A"}
+                            size="small"
+                            color="info"
+                            variant={isDark ? "outlined" : "filled"}
+                          />
+                        </TableCell>
+                        <TableCell>{formatBytes(item.file_size || 0)}</TableCell>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {new Date(item.created_at).toLocaleDateString()}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {new Date(item.created_at).toLocaleTimeString()}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Stack direction="row" spacing={1}>
+                            <Tooltip title="Preview">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handlePreview(item)}
+                                  disabled={previewLoadingId === item.id}
+                                  sx={{
+                                    bgcolor: alpha(theme.palette.primary.main, 0.12),
+                                    "&:hover": {
+                                      bgcolor: alpha(theme.palette.primary.main, 0.2),
+                                    },
+                                  }}
+                                >
+                                  <VisibilityRoundedIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="Download CSV">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleDownload(item)}
+                                  disabled={downloadingId === item.id}
+                                  sx={{
+                                    bgcolor: alpha(theme.palette.success.main, 0.12),
+                                    "&:hover": {
+                                      bgcolor: alpha(theme.palette.success.main, 0.2),
+                                    },
+                                  }}
+                                >
+                                  <DownloadRoundedIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </Stack>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             )}
           </Paper>
         </Grid>
 
         <Grid item xs={12} lg={5}>
-          <Paper sx={{ p: 2.5, minHeight: 360 }}>
+          <Paper
+            sx={{
+              p: 2.5,
+              minHeight: 360,
+              borderRadius: 3,
+              border: `1px solid ${borderSoft}`,
+              boxShadow: panelShadow,
+              bgcolor: alpha(surface, isDark ? 0.88 : 0.99),
+            }}
+          >
             <Typography variant="h6" mb={1}>
               Preview
             </Typography>
             <Typography variant="body2" color="text.secondary" mb={2}>
-              Select an export to preview the first few rows.
+              Select an export to preview the full CSV list.
             </Typography>
             <Divider sx={{ mb: 2 }} />
             {!previewMeta && (
@@ -321,32 +490,43 @@ const FacultyExports = () => {
                     {previewMeta.file_name}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Faculty {previewMeta.faculty_id || "—"} •{" "}
+                    Faculty {previewMeta.faculty_id || "N/A"} -{" "}
                     {new Date(previewMeta.created_at).toLocaleString()}
                   </Typography>
                 </Stack>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      {previewHeaders.map((header) => (
-                        <TableCell key={header} sx={{ fontWeight: 600 }}>
-                          {header}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {previewRows.map((row, rowIndex) => (
-                      <TableRow key={`${previewMeta.id}-row-${rowIndex}`}>
-                        {previewHeaders.map((_, cellIndex) => (
-                          <TableCell key={`${previewMeta.id}-cell-${rowIndex}-${cellIndex}`}>
-                            {row[cellIndex] ?? ""}
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                  Rows shown: {previewRows.length || 0}
+                </Typography>
+                <TableContainer
+                  sx={{
+                    maxHeight: 360,
+                    borderRadius: 2.5,
+                    border: `1px solid ${borderSoft}`,
+                  }}
+                >
+                  <Table size="small" stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        {previewHeaders.map((header) => (
+                          <TableCell key={header} sx={{ fontWeight: 600 }}>
+                            {header}
                           </TableCell>
                         ))}
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHead>
+                    <TableBody>
+                      {previewRows.map((row, rowIndex) => (
+                        <TableRow key={`${previewMeta.id}-row-${rowIndex}`}>
+                          {previewHeaders.map((_, cellIndex) => (
+                            <TableCell key={`${previewMeta.id}-cell-${rowIndex}-${cellIndex}`}>
+                              {row[cellIndex] ?? ""}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
               </>
             )}
           </Paper>
@@ -357,3 +537,5 @@ const FacultyExports = () => {
 };
 
 export default FacultyExports;
+
+

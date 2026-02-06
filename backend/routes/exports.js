@@ -10,7 +10,8 @@ const useB2 = Boolean(
   process.env.B2_BUCKET_NAME &&
     process.env.B2_KEY_ID &&
     process.env.B2_APPLICATION_KEY &&
-    process.env.B2_S3_ENDPOINT
+    process.env.B2_S3_ENDPOINT &&
+    String(process.env.B2_ENABLED || "").toLowerCase() === "true"
 );
 
 const ensureHttps = (value) => {
@@ -80,16 +81,23 @@ router.post("/", async (req, res) => {
     let storedContent = content;
 
     if (useB2) {
-      objectKey = buildObjectKey(normalizedFacultyId, file_name);
-      const command = new PutObjectCommand({
-        Bucket: process.env.B2_BUCKET_NAME,
-        Key: objectKey,
-        Body: content,
-        ContentType: "text/csv",
-      });
-      await b2Client.send(command);
-      storageProvider = "b2";
-      storedContent = null;
+      try {
+        objectKey = buildObjectKey(normalizedFacultyId, file_name);
+        const command = new PutObjectCommand({
+          Bucket: process.env.B2_BUCKET_NAME,
+          Key: objectKey,
+          Body: content,
+          ContentType: "text/csv",
+        });
+        await b2Client.send(command);
+        storageProvider = "b2";
+        storedContent = null;
+      } catch (storageError) {
+        console.warn("B2 upload failed, storing export in database instead.");
+        objectKey = null;
+        storageProvider = null;
+        storedContent = content;
+      }
     }
 
     const result = await pool.query(
