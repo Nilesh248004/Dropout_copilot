@@ -714,6 +714,10 @@ const createCounsellingServer = () => {
 };
 
 const mcpServer = createCounsellingServer();
+const transport = new StreamableHTTPServerTransport({
+  sessionIdGenerator: undefined,
+  enableJsonResponse: true,
+});
 
 const handleChatStream = async (req, res) => {
   if (req.method !== "POST") {
@@ -831,12 +835,12 @@ const handler = async (req, res) => {
     return;
   }
 
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-    enableJsonResponse: true,
-  });
+  const requiredAccept = "application/json, text/event-stream";
+  req.headers.accept = requiredAccept;
+  if (!req.headers["content-type"]) {
+    req.headers["content-type"] = "application/json";
+  }
 
-  await mcpServer.connect(transport);
   await transport.handleRequest(req, res);
 };
 
@@ -848,8 +852,16 @@ const httpServer = createServer((req, res) => {
   });
 });
 
-httpServer.listen(MCP_PORT, () => {
-  console.log(`MCP counselling server running on http://localhost:${MCP_PORT}${MCP_PATH}`);
+const startServer = async () => {
+  await mcpServer.connect(transport);
+  httpServer.listen(MCP_PORT, () => {
+    console.log(`MCP counselling server running on http://localhost:${MCP_PORT}${MCP_PATH}`);
+  });
+};
+
+startServer().catch((err) => {
+  console.error("Failed to start MCP server:", err);
+  process.exit(1);
 });
 
 

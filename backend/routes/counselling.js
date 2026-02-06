@@ -284,33 +284,64 @@ const streamOllamaExplanation = async ({ systemPrompt, question, onToken }) => {
 
   return { stream, done };
 };
-const callMcpChat = async ({ student_id, question, chat_history }) => {
+const buildMcpHeaders = (apiKey) => ({
+  Accept: "application/json, text/event-stream",
+  "Content-Type": "application/json",
+  ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+});
+
+const parseMcpResponse = (payload) => {
+  if (!payload) return null;
+  const data = Array.isArray(payload) ? payload[0] : payload;
+  if (!data) return null;
+  if (data.error) {
+    const message = data.error?.message || "MCP error";
+    throw new Error(message);
+  }
+  return data.result ?? data.toolResult ?? data;
+};
+
+const callMcpTool = async ({ toolName, args, timeoutMs }) => {
   const enabled = String(process.env.MCP_ENABLED || "").toLowerCase() === "true";
   const mcpUrl = process.env.MCP_URL || process.env.MCP_SERVER_URL;
   if (!enabled || !mcpUrl) return null;
-  const apiKey = process.env.MCP_API_KEY;
-  const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
 
+  const apiKey = process.env.MCP_API_KEY;
+  const headers = buildMcpHeaders(apiKey);
+  const requestPayload = {
+    jsonrpc: "2.0",
+    id: `mcp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    method: "tools/call",
+    params: {
+      name: toolName,
+      arguments: args || {},
+    },
+  };
+
+  const startedAt = Date.now();
+  const response = await axios.post(mcpUrl, requestPayload, {
+    headers,
+    timeout: timeoutMs || 15000,
+  });
+  const durationMs = Date.now() - startedAt;
+  const rawData = response.data || null;
+  const data = parseMcpResponse(rawData);
+  const sizeBytes = JSON.stringify(rawData || {}).length;
+  return {
+    data,
+    meta: {
+      latency_ms: durationMs,
+      response_bytes: sizeBytes,
+    },
+  };
+};
+
+const callMcpChat = async ({ student_id, question, chat_history }) => {
   try {
-    const startedAt = Date.now();
-    const response = await axios.post(
-      mcpUrl,
-      {
-        tool: "counselling_chat",
-        input: { student_id, question, chat_history },
-      },
-      { headers, timeout: 15000 }
-    );
-    const durationMs = Date.now() - startedAt;
-    const data = response.data || null;
-    const sizeBytes = JSON.stringify(data || {}).length;
-    return {
-      data,
-      meta: {
-        latency_ms: durationMs,
-        response_bytes: sizeBytes,
-      },
-    };
+    return await callMcpTool({
+      toolName: "counselling_chat",
+      args: { student_id, question, chat_history },
+    });
   } catch (err) {
     console.error("❌ MCP Chat Error:", err.message);
     return null;
@@ -318,39 +349,30 @@ const callMcpChat = async ({ student_id, question, chat_history }) => {
 };
 
 const callMcpCounselling = async (payload) => {
-  const enabled = String(process.env.MCP_ENABLED || "").toLowerCase() === "true";
-  const mcpUrl = process.env.MCP_URL;
-  if (!enabled || !mcpUrl) return null;
-  const apiKey = process.env.MCP_API_KEY;
-  const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
-
   try {
-    const startedAt = Date.now();
-    const response = await axios.post(
-      mcpUrl,
-      {
-        tool: "counselling.generate",
-        input: payload,
-      },
-      { headers, timeout: 15000 }
-    );
-    const durationMs = Date.now() - startedAt;
-    const data = response.data || null;
-    const usage = data?.usage || data?.token_usage || null;
-    const sizeBytes = JSON.stringify(data || {}).length;
-    console.log(
-      `🧠 MCP counselling duration_ms=${durationMs} size_bytes=${sizeBytes}${
-        usage ? ` usage=${JSON.stringify(usage)}` : ""
-      }`
-    );
-    return {
-      data,
-      meta: {
-        latency_ms: durationMs,
-        response_bytes: sizeBytes,
-        usage,
-      },
-    };
+    const result = await callMcpTool({
+      toolName: "counselling_generate",
+      args: payload,
+    });
+    const usage = result?.data?.usage || result?.data?.token_usage || null;
+    const sizeBytes = JSON.stringify(result?.data || {}).length;
+    if (result?.meta) {
+      console.log(
+        `🧠 MCP counselling duration_ms=${result.meta.latency_ms} size_bytes=${sizeBytes}${
+          usage ? ` usage=${JSON.stringify(usage)}` : ""
+        }`
+      );
+    }
+    return result
+      ? {
+          data: result.data,
+          meta: {
+            ...result.meta,
+            response_bytes: sizeBytes,
+            usage,
+          },
+        }
+      : null;
   } catch (err) {
     console.error("❌ MCP Counselling Error:", err.message);
     return null;
@@ -591,14 +613,16 @@ router.post("/ai", async (req, res) => {
 
     const mcpResult = await callMcpCounselling(payload);
     const mcpResponse = mcpResult?.data || null;
+    const mcpStructured =
+      mcpResponse?.structuredContent || mcpResponse?.structured_content || null;
     const baseInsights = buildRuleBasedCounselling(payload);
 
     const response = {
       ...baseInsights,
-      ...(mcpResponse && typeof mcpResponse === "object" ? mcpResponse : {}),
+      ...(mcpStructured && typeof mcpStructured === "object" ? mcpStructured : {}),
       metadata: {
         generated_at: new Date().toISOString(),
-        source: mcpResponse ? "mcp" : "rule",
+        source: mcpStructured ? "mcp" : "rule",
         cache: "miss",
         ...(mcpResult?.meta ? { mcp: mcpResult.meta } : {}),
       },
