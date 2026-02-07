@@ -82,7 +82,7 @@ const StudentForm = ({ student, onClose, refresh }) => {
   };
 
   return (
-    <Box p={2} width={400}>
+    <Box p={2} sx={{ width: "100%", maxWidth: 420 }}>
       <Typography variant="h6" mb={2}>
         {student ? "Edit Student" : "Add Student"}
       </Typography>

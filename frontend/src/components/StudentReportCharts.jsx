@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Grid, Paper, Stack, Typography } from "@mui/material";
+import { Box, Grid, Paper, Stack, Typography, useMediaQuery } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import { getRiskScore } from "../utils/risk";
 
@@ -11,6 +11,7 @@ const toNumber = (value) => {
 const StudentReportCharts = ({ student }) => {
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const textPrimary = theme.palette.text.primary;
   const textSecondary = theme.palette.text.secondary;
   const borderSoft = alpha(textPrimary, isDark ? 0.2 : 0.12);
@@ -34,6 +35,7 @@ const StudentReportCharts = ({ student }) => {
   const improvementScore = improvementParts.length
     ? improvementParts.reduce((sum, value) => sum + value, 0) / improvementParts.length
     : null;
+  const valueVariant = isMobile ? "subtitle1" : "h6";
 
   const metrics = [
     {
@@ -112,11 +114,15 @@ const StudentReportCharts = ({ student }) => {
                       )} 55%, ${alpha(metric.color, 0.05)} 100%)`,
                 }}
               >
-                <Stack direction="row" spacing={2.5} alignItems="center">
+                <Stack
+                  direction={{ xs: "column", sm: "row" }}
+                  spacing={{ xs: 1.5, sm: 2.5 }}
+                  alignItems={{ xs: "flex-start", sm: "center" }}
+                >
                   <Box
                     sx={{
-                      width: 120,
-                      height: 120,
+                      width: { xs: 96, sm: 120 },
+                      height: { xs: 96, sm: 120 },
                       borderRadius: "50%",
                       background: `conic-gradient(${metric.color} ${percent}%, ${alpha(
                         metric.color,
@@ -128,8 +134,8 @@ const StudentReportCharts = ({ student }) => {
                   >
                     <Box
                       sx={{
-                        width: 88,
-                        height: 88,
+                        width: { xs: 68, sm: 88 },
+                        height: { xs: 68, sm: 88 },
                         borderRadius: "50%",
                         bgcolor: alpha(theme.palette.background.paper, isDark ? 0.85 : 0.96),
                         border: `1px solid ${alpha(metric.color, 0.3)}`,
@@ -137,7 +143,7 @@ const StudentReportCharts = ({ student }) => {
                         placeItems: "center",
                       }}
                     >
-                      <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                      <Typography variant={valueVariant} sx={{ fontWeight: 800 }}>
                         {displayValue}
                       </Typography>
                     </Box>

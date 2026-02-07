@@ -3,8 +3,10 @@ import React, { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Paper, IconButton, Typography, Box, CircularProgress, Dialog, DialogContent, DialogTitle, Chip, Alert
+  Paper, IconButton, Typography, Box, CircularProgress, Dialog, DialogContent, DialogTitle, Chip, Alert,
+  Stack, Button, useMediaQuery
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import PsychologyIcon from "@mui/icons-material/Psychology";
@@ -16,6 +18,8 @@ import { filterStudentsByFaculty } from "../utils/faculty";
 
 const StudentTable = ({ refresh, searchTerm = "" }) => {
   const { role, facultyId } = useRole();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openProfile, setOpenProfile] = useState(false);
@@ -110,9 +114,75 @@ const StudentTable = ({ refresh, searchTerm = "" }) => {
 
       {loading ? (
         <CircularProgress />
+      ) : isMobile ? (
+        <Stack spacing={2}>
+          {filteredStudents.map((s) => (
+            <Paper key={s.id} sx={{ p: 2, borderRadius: 3 }}>
+              <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                <Box>
+                  <Typography sx={{ fontWeight: 700 }}>{s.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {s.register_number || "--"}
+                  </Typography>
+                </Box>
+                {s.risk_score != null ? (
+                  <Chip
+                    label={`${(s.risk_score * 100).toFixed(1)}%`}
+                    color={s.risk_score > 0.7 ? "error" : s.risk_score > 0.4 ? "warning" : "success"}
+                    size="small"
+                  />
+                ) : (
+                  <Chip label="Not Predicted" size="small" variant="outlined" />
+                )}
+              </Stack>
+
+              <Stack spacing={0.6} mt={1.2}>
+                <Typography variant="body2" color="text.secondary">
+                  Year/Sem: {s.year} / {s.semester}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Attendance: {s.attendance ?? "N/A"} | CGPA: {s.cgpa ?? "N/A"}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Disciplinary: {s.disciplinary_issues ?? "N/A"}
+                </Typography>
+                {s.phone_number && (
+                  <Typography variant="body2" color="text.secondary">
+                    Phone: {s.phone_number}
+                  </Typography>
+                )}
+              </Stack>
+
+              <Stack direction="row" spacing={1} flexWrap="wrap" mt={1.5}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => handleEdit(s.id)}
+                >
+                  Edit
+                </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="error"
+                  onClick={() => handleDelete(s.id)}
+                >
+                  Delete
+                </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  onClick={() => handleViewProfile(s)}
+                >
+                  Profile
+                </Button>
+              </Stack>
+            </Paper>
+          ))}
+        </Stack>
       ) : (
-        <TableContainer component={Paper} sx={{ maxHeight: 500 }}>
-          <Table stickyHeader>
+        <TableContainer component={Paper} sx={{ maxHeight: 500, overflowX: "auto" }}>
+          <Table stickyHeader sx={{ minWidth: 720 }}>
             <TableHead>
               <TableRow>
                 {[

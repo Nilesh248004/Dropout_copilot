@@ -1,12 +1,27 @@
 import React from "react";
-import { AppBar, Toolbar, Typography, Button, Box, Chip } from "@mui/material";
+import {
+  AppBar,
+  Toolbar,
+  Typography,
+  Button,
+  Box,
+  Chip,
+  IconButton,
+  Menu,
+  MenuItem,
+  useMediaQuery,
+} from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 import { useRole } from "../context/RoleContext";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
+import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
 
 const Navbar = ({ themeMode, onToggleTheme }) => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const { role } = useRole();
   const navigate = useNavigate();
   const location = useLocation();
@@ -16,10 +31,61 @@ const Navbar = ({ themeMode, onToggleTheme }) => {
   const isAdmin = role === "admin";
   const isActive = (path) => location.pathname === path;
   const isReportActive = isStudent && location.pathname === "/student/report";
+  const [menuAnchorEl, setMenuAnchorEl] = React.useState(null);
+  const menuOpen = Boolean(menuAnchorEl);
 
   const handleLogout = () => {
     navigate("/login");
   };
+
+  const handleMenuOpen = (event) => {
+    setMenuAnchorEl(event.currentTarget);
+  };
+
+  const handleMenuClose = () => {
+    setMenuAnchorEl(null);
+  };
+
+  const handleMenuNavigate = (target) => {
+    handleMenuClose();
+    if (target) {
+      navigate(target);
+    }
+  };
+
+  const handleMenuAction = (action) => {
+    handleMenuClose();
+    if (action) {
+      action();
+    }
+  };
+
+  const navItems = isStudent
+    ? [
+        { label: "Dashboard", to: "/dashboard/student" },
+        { label: "My Report", to: "/student/report" },
+        { label: "Alerts", to: "/student/alerts" },
+        { label: "Logout", action: handleLogout },
+      ]
+    : isFaculty
+      ? [
+          { label: "Dashboard", to: "/dashboard/faculty" },
+          { label: "Add Student", to: "/students/add" },
+          { label: "Student List", to: "/studentlist" },
+          { label: "Alerts", to: "/faculty/alerts" },
+          { label: "Logout", action: handleLogout },
+        ]
+      : isAdmin
+        ? [
+            { label: "Dashboard", to: "/dashboard/admin" },
+            { label: "Faculty Exports", to: "/admin/exports" },
+            { label: "Student List", to: "/studentlist" },
+            { label: "Logout", action: handleLogout },
+          ]
+        : [
+            { label: "Dashboard", to: "/dashboard" },
+            { label: "Login", to: "/login" },
+          ];
 
   return (
     <AppBar
@@ -31,7 +97,7 @@ const Navbar = ({ themeMode, onToggleTheme }) => {
         backdropFilter: "blur(10px)",
       }}
     >
-      <Toolbar sx={{ minHeight: 72 }}>
+      <Toolbar sx={{ minHeight: 72, flexWrap: "wrap" }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexGrow: 1 }}>
           <Box
             sx={{
@@ -59,7 +125,7 @@ const Navbar = ({ themeMode, onToggleTheme }) => {
           </Box>
         </Box>
 
-        <Box display="flex" alignItems="center" gap={1.5}>
+        <Box display="flex" alignItems="center" gap={1.5} flexWrap="wrap">
           <Chip
             label={roleLabel}
             size="small"
@@ -88,8 +154,42 @@ const Navbar = ({ themeMode, onToggleTheme }) => {
           >
             {themeMode === "dark" ? "Light Mode" : "Dark Mode"}
           </Button>
+          {isMobile && (
+            <>
+              <IconButton
+                color="inherit"
+                onClick={handleMenuOpen}
+                sx={{
+                  borderRadius: 999,
+                  border: "1px solid rgba(148,163,184,0.4)",
+                  color: "#e2e8f0",
+                }}
+              >
+                <MenuRoundedIcon />
+              </IconButton>
+              <Menu
+                anchorEl={menuAnchorEl}
+                open={menuOpen}
+                onClose={handleMenuClose}
+                anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+                transformOrigin={{ vertical: "top", horizontal: "right" }}
+              >
+                {navItems.map((item) => (
+                  <MenuItem
+                    key={item.label}
+                    onClick={() =>
+                      item.action ? handleMenuAction(item.action) : handleMenuNavigate(item.to)
+                    }
+                  >
+                    {item.label}
+                  </MenuItem>
+                ))}
+              </Menu>
+            </>
+          )}
         </Box>
-        <Box sx={{ ml: 3, display: "flex", gap: 1 }}>
+        {!isMobile && (
+        <Box sx={{ ml: 3, display: "flex", gap: 1, flexWrap: "wrap" }}>
           {isStudent ? (
             <>
               <Button
@@ -368,6 +468,7 @@ const Navbar = ({ themeMode, onToggleTheme }) => {
             </>
           )}
         </Box>
+        )}
       </Toolbar>
     </AppBar>
   );

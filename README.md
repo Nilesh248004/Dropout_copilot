@@ -1,5 +1,7 @@
 # Dropout Copilot
 
+Responsive UI: the project can be explored in both desktop and mobile views.
+
 ## Deployment Environment Variables
 Do not commit `.env` files. For Render (backend / MCP server) and Vercel (frontend),
 set environment variables in the hosting dashboard. Use your local `.env` files
@@ -42,3 +44,4 @@ Optional (LLM providers):
 - `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_BASE_URL`
 - `OLLAMA_BASE_URL`, `OLLAMA_MODEL`
 - `MCP_SERVER_URL`, `MCP_SERVER_LABEL`
+

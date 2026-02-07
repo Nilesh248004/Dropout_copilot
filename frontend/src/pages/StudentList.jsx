@@ -18,6 +18,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  useMediaQuery,
   Stack,
   TextField,
   Typography,
@@ -35,10 +36,13 @@ const StudentList = ({ students: propStudents, reload, counsellingRequests, onCo
   const isDark = theme.palette.mode === "dark";
   const textPrimary = theme.palette.text.primary;
   const surface = theme.palette.background.paper;
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const borderSoft = alpha(textPrimary, isDark ? 0.2 : 0.12);
   const borderStrong = alpha(textPrimary, isDark ? 0.35 : 0.18);
   const glassSurface = alpha(surface, isDark ? 0.75 : 0.95);
   const tableHeaderBg = alpha(theme.palette.primary.main, isDark ? 0.2 : 0.08);
+  const hideOnXs = { display: { xs: "none", sm: "table-cell" } };
+  const hideOnSmDown = { display: { xs: "none", md: "table-cell" } };
   const [students, setStudents] = useState(propStudents || []);
   const [loading, setLoading] = useState(!Array.isArray(propStudents));
   const [predictingId, setPredictingId] = useState(null);
@@ -331,6 +335,137 @@ const StudentList = ({ students: propStudents, reload, counsellingRequests, onCo
         </Stack>
       </Stack>
 
+      {isMobile && (
+        <Stack spacing={2} sx={{ mb: 2 }}>
+          {students.map((s) => {
+            const riskScore = getRiskScore(s);
+            const riskLevelRaw = getRiskLevel(s);
+            const riskLevelNormalized =
+              typeof riskLevelRaw === "string" ? riskLevelRaw.toUpperCase() : null;
+            const hasPrediction =
+              riskLevelNormalized !== null &&
+              ["HIGH", "MEDIUM", "LOW"].includes(riskLevelNormalized);
+            const isLowRisk = riskLevelNormalized === "LOW";
+            const canAssign =
+              role === "faculty" &&
+              ["HIGH", "MEDIUM"].includes(riskLevelNormalized || "");
+            const counsellingEntry = counsellingByStudent.get(s.id);
+            const counsellingStatusRaw = counsellingEntry?.status || "";
+            const counsellingStatusNormalized = String(counsellingStatusRaw).toUpperCase();
+            const hasScheduled = counsellingStatusNormalized === "SCHEDULED";
+            const assignColor = riskLevelNormalized === "HIGH" ? "error" : "warning";
+            const isPredicting = predictingId === s.id;
+            const feeLabel =
+              s.fees_paid === null || s.fees_paid === undefined
+                ? "N/A"
+                : s.fees_paid
+                  ? "Yes"
+                  : "No";
+
+            return (
+              <Paper
+                key={s.id}
+                sx={{
+                  p: 2,
+                  borderRadius: 3,
+                  border: `1px solid ${borderSoft}`,
+                  background: alpha(surface, isDark ? 0.7 : 0.96),
+                  boxShadow: `0 14px 26px ${alpha(theme.palette.common.black, isDark ? 0.35 : 0.06)}`,
+                }}
+              >
+                <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
+                  <Box>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                      {s.name}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {s.register_number || "--"}
+                    </Typography>
+                  </Box>
+                  {hasPrediction && riskScore !== null ? (
+                    <Chip
+                      label={`${(riskScore * 100).toFixed(1)}% ${riskLevelNormalized || ""}`.trim()}
+                      color={riskColor(riskLevelNormalized, riskScore)}
+                      size="small"
+                      sx={{ fontWeight: 700 }}
+                    />
+                  ) : (
+                    <Chip
+                      label={hasCompleteAcademic(s) ? "Not Predicted" : "Incomplete"}
+                      size="small"
+                      variant="outlined"
+                    />
+                  )}
+                </Stack>
+
+                <Stack spacing={0.6} mt={1.2}>
+                  <Typography variant="body2" color="text.secondary">
+                    Year/Sem: {s.year} / {s.semester}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Attendance: {s.attendance ?? "N/A"} | CGPA: {s.cgpa ?? "N/A"}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Arrears: {s.arrear_count ?? "N/A"} | Fees: {feeLabel}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Disciplinary: {s.disciplinary_issues ?? "N/A"}
+                  </Typography>
+                  {s.phone_number && (
+                    <Typography variant="body2" color="text.secondary">
+                      Phone: {s.phone_number}
+                    </Typography>
+                  )}
+                </Stack>
+
+                <Stack direction="row" spacing={1} flexWrap="wrap" mt={1.5}>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={() => runPrediction(s.id)}
+                    disabled={isPredicting || !hasCompleteAcademic(s)}
+                    color={hasPrediction ? "success" : "primary"}
+                    sx={{ textTransform: "none", fontWeight: 700 }}
+                  >
+                    {isPredicting ? "Predicting..." : hasPrediction ? "Predicted" : "Predict"}
+                  </Button>
+                  {isLowRisk ? (
+                    <Chip label="Low risk" size="small" variant="outlined" />
+                  ) : hasScheduled ? (
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      color="info"
+                      onClick={() => handleMarkCompleted(counsellingEntry?.id)}
+                      sx={{ textTransform: "none", fontWeight: 700 }}
+                    >
+                      Mark Completed
+                    </Button>
+                  ) : counsellingStatusNormalized === "COMPLETED" ? (
+                    <Chip label="Completed" size="small" color="success" />
+                  ) : counsellingStatusNormalized === "CANCELLED" ? (
+                    <Chip label="Cancelled" size="small" color="error" variant="outlined" />
+                  ) : canAssign ? (
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      color={assignColor}
+                      onClick={() => openAssignDialog(s, riskLevelNormalized)}
+                      sx={{ textTransform: "none", fontWeight: 700 }}
+                    >
+                      Assign Counselling
+                    </Button>
+                  ) : (
+                    <Chip label="No counselling" size="small" variant="outlined" />
+                  )}
+                </Stack>
+              </Paper>
+            );
+          })}
+        </Stack>
+      )}
+
+      {!isMobile && (
       <TableContainer
         component={Paper}
         variant="outlined"
@@ -342,35 +477,36 @@ const StudentList = ({ students: propStudents, reload, counsellingRequests, onCo
           boxShadow: `0 14px 30px ${alpha(theme.palette.common.black, isDark ? 0.35 : 0.06)}`,
         }}
       >
-        <Table sx={{ minWidth: 1200 }} size="medium">
+        <Table sx={{ minWidth: { xs: 720, sm: 960, md: 1200 } }} size="medium">
           <TableHead>
             <TableRow sx={{ background: tableHeaderBg }}>
               {[
-                "Name",
-                "Reg No",
-                "Year",
-                "Sem",
-                "Phone",
-                "Attendance",
-                "CGPA",
-                "Arrears",
-                "Fees",
-                "Disciplinary",
-                "Risk Score",
-                "Counselling",
-                "Actions",
-              ].map((h) => (
+                { label: "Name" },
+                { label: "Reg No" },
+                { label: "Year", sx: hideOnXs },
+                { label: "Sem", sx: hideOnXs },
+                { label: "Phone", sx: hideOnSmDown },
+                { label: "Attendance", sx: hideOnSmDown },
+                { label: "CGPA", sx: hideOnSmDown },
+                { label: "Arrears", sx: hideOnSmDown },
+                { label: "Fees", sx: hideOnSmDown },
+                { label: "Disciplinary", sx: hideOnSmDown },
+                { label: "Risk Score" },
+                { label: "Counselling" },
+                { label: "Actions" },
+              ].map(({ label, sx }) => (
                 <TableCell
-                  key={h}
+                  key={label}
                   sx={{
                     fontWeight: 700,
                     textTransform: "uppercase",
                     letterSpacing: 1,
                     fontSize: 12,
                     color: "text.secondary",
+                    ...(sx || {}),
                   }}
                 >
-                  {h}
+                  {label}
                 </TableCell>
               ))}
             </TableRow>
@@ -415,23 +551,23 @@ const StudentList = ({ students: propStudents, reload, counsellingRequests, onCo
                 <Stack spacing={0.2}>
                   <Typography sx={{ fontWeight: 600 }}>{s.name}</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {s.register_number || "—"}
+                    {s.register_number || "--"}
                   </Typography>
                 </Stack>
               </TableCell>
               <TableCell>{s.register_number}</TableCell>
-              <TableCell align="center">{s.year}</TableCell>
-              <TableCell align="center">{s.semester}</TableCell>
-              <TableCell>{s.phone_number ?? "N/A"}</TableCell>
-              <TableCell align="center">{s.attendance ?? "N/A"}</TableCell>
-              <TableCell align="center">{s.cgpa ?? "N/A"}</TableCell>
-              <TableCell align="center">{s.arrear_count ?? "N/A"}</TableCell>
-              <TableCell align="center">
+              <TableCell align="center" sx={hideOnXs}>{s.year}</TableCell>
+              <TableCell align="center" sx={hideOnXs}>{s.semester}</TableCell>
+              <TableCell sx={hideOnSmDown}>{s.phone_number ?? "N/A"}</TableCell>
+              <TableCell align="center" sx={hideOnSmDown}>{s.attendance ?? "N/A"}</TableCell>
+              <TableCell align="center" sx={hideOnSmDown}>{s.cgpa ?? "N/A"}</TableCell>
+              <TableCell align="center" sx={hideOnSmDown}>{s.arrear_count ?? "N/A"}</TableCell>
+              <TableCell align="center" sx={hideOnSmDown}>
                 {s.fees_paid === null || s.fees_paid === undefined ? "N/A" : s.fees_paid ? "Yes" : "No"}
               </TableCell>
-              <TableCell align="center">{s.disciplinary_issues ?? "N/A"}</TableCell>
+              <TableCell align="center" sx={hideOnSmDown}>{s.disciplinary_issues ?? "N/A"}</TableCell>
 
-                {/* ✅ SHOW PREDICTION SCORE */}
+                {/* Show prediction score */}
                 <TableCell align="center">
                   {hasPrediction && riskScore !== null ? (
                     <Chip
@@ -445,7 +581,7 @@ const StudentList = ({ students: propStudents, reload, counsellingRequests, onCo
                 <TableCell align="center">
                   {isLowRisk ? (
                     <Typography variant="caption" color="text.secondary">
-                      —
+                      --
                     </Typography>
                   ) : hasScheduled ? (
                     <Button
@@ -496,7 +632,7 @@ const StudentList = ({ students: propStudents, reload, counsellingRequests, onCo
                     </Button>
                   ) : (
                     <Typography variant="caption" color="text.secondary">
-                      —
+                      --
                     </Typography>
                   )}
                 </TableCell>
@@ -521,6 +657,7 @@ const StudentList = ({ students: propStudents, reload, counsellingRequests, onCo
           </TableBody>
         </Table>
       </TableContainer>
+      )}
 
       <Dialog
         open={assignDialogOpen}

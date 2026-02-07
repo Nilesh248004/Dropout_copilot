@@ -467,15 +467,24 @@ const LoginPage = () => {
     const googleApi = googleApiRef.current || window.google?.accounts?.id;
     if (!googleApi || !googleButtonRef.current) return;
 
-    // Re-render button when toggling sign-in/sign-up mode.
-    googleButtonRef.current.innerHTML = "";
-    googleApi.renderButton(googleButtonRef.current, {
-      theme: "outline",
-      size: "large",
-      text: mode === "signup" ? "signup_with" : "signin_with",
-      shape: "pill",
-      width: 360,
-    });
+    const renderGoogleButton = () => {
+      const container = googleButtonRef.current;
+      if (!container) return;
+      container.innerHTML = "";
+      const width = Math.min(360, container.offsetWidth || 360);
+      googleApi.renderButton(container, {
+        theme: "outline",
+        size: "large",
+        text: mode === "signup" ? "signup_with" : "signin_with",
+        shape: "pill",
+        width,
+      });
+    };
+
+    // Re-render button when toggling sign-in/sign-up mode and on resize.
+    renderGoogleButton();
+    window.addEventListener("resize", renderGoogleButton);
+    return () => window.removeEventListener("resize", renderGoogleButton);
   }, [googleReady, mode]);
 
   useEffect(() => {

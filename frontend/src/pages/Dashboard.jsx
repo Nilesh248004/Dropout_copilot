@@ -1718,7 +1718,13 @@ const Dashboard = () => {
             )}
             <Stack spacing={2}>
               {highRiskStudents.slice(0, 5).map((student) => (
-                <Paper key={student.id} sx={{ p: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <Paper key={student.id} sx={{ p: 2 }}>
+                  <Stack
+                    direction={{ xs: "column", sm: "row" }}
+                    spacing={2}
+                    alignItems={{ sm: "center" }}
+                    justifyContent="space-between"
+                  >
                   <Box>
                     <Typography fontWeight={600}>{student.name}</Typography>
                     <Typography variant="body2" color="text.secondary">
@@ -1731,6 +1737,7 @@ const Dashboard = () => {
                     onClick={() => handleAlertStudent(student)}
                     disabled={Boolean(alertedStudents[student.id])}
                     sx={{
+                      alignSelf: { xs: "stretch", sm: "auto" },
                       "&.Mui-disabled": alertedStudents[student.id]
                         ? {
                             color: "#fff",
@@ -1741,6 +1748,7 @@ const Dashboard = () => {
                   >
                     {alertedStudents[student.id] ? "Alerted" : "Alert Student"}
                   </Button>
+                  </Stack>
                 </Paper>
               ))}
               {highRiskStudents.length === 0 && (
@@ -1775,8 +1783,8 @@ const Dashboard = () => {
               <Alert severity="info">No support queries yet.</Alert>
             )}
             {facultySupportRequests.length > 0 && (
-              <TableContainer component={Paper} variant="outlined">
-                <Table>
+              <TableContainer component={Paper} variant="outlined" sx={{ overflowX: "auto" }}>
+                <Table sx={{ minWidth: 640 }}>
                   <TableHead>
                     <TableRow>
                       {["Student", "Reg No", "Reason", "Requested", "Status", "Actions"].map((header) => (
@@ -2195,8 +2203,8 @@ const Dashboard = () => {
                 Search above and click Apply to filter. Showing {filteredAdminStudents.length} student(s).
               </Typography>
             </Stack>
-            <TableContainer component={Paper}>
-              <Table>
+            <TableContainer component={Paper} sx={{ overflowX: "auto" }}>
+              <Table sx={{ minWidth: 640 }}>
                 <TableHead>
                   <TableRow>
                     {["Name", "Reg No", "Year", "Semester", "Risk", "Faculty", "Actions"].map((header) => (

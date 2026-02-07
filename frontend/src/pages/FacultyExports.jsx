@@ -18,6 +18,9 @@ import {
   TableRow,
   Tooltip,
   Typography,
+  useMediaQuery,
+  TextField,
+  MenuItem,
 } from "@mui/material";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import VisibilityRoundedIcon from "@mui/icons-material/VisibilityRounded";
@@ -79,6 +82,7 @@ const buildPreview = (text) => {
 const FacultyExports = () => {
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const textPrimary = theme.palette.text.primary;
   const textSecondary = theme.palette.text.secondary;
   const surface = theme.palette.background.paper;
@@ -96,6 +100,8 @@ const FacultyExports = () => {
   const [previewMeta, setPreviewMeta] = useState(null);
   const [previewLoadingId, setPreviewLoadingId] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
+  const [previewSearch, setPreviewSearch] = useState("");
+  const [previewRiskFilter, setPreviewRiskFilter] = useState("ALL");
 
   const fetchExports = async () => {
     try {
@@ -175,6 +181,47 @@ const FacultyExports = () => {
 
   const previewHeaders = useMemo(() => preview?.headers || [], [preview]);
   const previewRows = useMemo(() => preview?.rows || [], [preview]);
+  const riskColumnIndex = useMemo(() => {
+    if (!previewHeaders.length) return -1;
+    return previewHeaders.findIndex((header) =>
+      String(header || "").toLowerCase().includes("risk level")
+    );
+  }, [previewHeaders]);
+  const filteredPreviewRows = useMemo(() => {
+    if (!previewRows.length) return previewRows;
+    const search = previewSearch.trim().toLowerCase();
+    const risk = previewRiskFilter.toUpperCase();
+    return previewRows.filter((row) => {
+      const rowText = row.join(" ").toLowerCase();
+      const matchesSearch = !search || rowText.includes(search);
+      const matchesRisk = risk === "ALL" || rowText.includes(risk.toLowerCase());
+      return matchesSearch && matchesRisk;
+    });
+  }, [previewRows, previewSearch, previewRiskFilter]);
+  const previewCounts = useMemo(() => {
+    const counts = {
+      total: filteredPreviewRows.length,
+      high: 0,
+      medium: 0,
+      low: 0,
+    };
+    filteredPreviewRows.forEach((row) => {
+      let riskValue = "";
+      if (riskColumnIndex >= 0) {
+        riskValue = String(row[riskColumnIndex] || "").trim().toUpperCase();
+      } else {
+        const rowText = row.join(" ").toUpperCase();
+        if (rowText.includes("HIGH")) riskValue = "HIGH";
+        else if (rowText.includes("MEDIUM")) riskValue = "MEDIUM";
+        else if (rowText.includes("LOW")) riskValue = "LOW";
+      }
+      if (riskValue === "HIGH") counts.high += 1;
+      else if (riskValue === "MEDIUM") counts.medium += 1;
+      else if (riskValue === "LOW") counts.low += 1;
+    });
+    return counts;
+  }, [filteredPreviewRows, riskColumnIndex]);
+  const isPreviewActive = Boolean(previewMeta && previewHeaders.length > 0);
 
   const totalExports = exportsList.length;
   const totalRows = exportsList.reduce((sum, item) => sum + (item.row_count || 0), 0);
@@ -182,7 +229,15 @@ const FacultyExports = () => {
   const latestExport = exportsList[0];
 
   return (
-    <Container sx={{ mt: 4, mb: 6 }}>
+    <Container
+      maxWidth={false}
+      disableGutters
+      sx={{
+        mt: 4,
+        mb: 6,
+        px: { xs: 2, md: 4 },
+      }}
+    >
       <Paper
         sx={{
           p: 3,
@@ -263,16 +318,28 @@ const FacultyExports = () => {
           bgcolor: alpha(surface, isDark ? 0.85 : 0.98),
         }}
       >
-        <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={2}
+          alignItems={{ xs: "stretch", md: "center" }}
+          justifyContent="space-between"
+        >
           <Button
             variant="outlined"
             startIcon={<RefreshRoundedIcon />}
             onClick={fetchExports}
             disabled={loading}
+            sx={{ alignSelf: { xs: "stretch", md: "auto" } }}
           >
             {loading ? "Loading..." : "Refresh List"}
           </Button>
-          <Stack direction="row" spacing={1} sx={{ ml: { md: "auto" } }} flexWrap="wrap">
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{ ml: { md: "auto" } }}
+            justifyContent={{ xs: "flex-start", md: "flex-end" }}
+            flexWrap="wrap"
+          >
             <Chip label={`Showing all: ${exportsList.length}`} variant="outlined" />
             {latestExport && (
               <Chip label={`Latest: ${latestExport.file_name}`} color="primary" />
@@ -286,8 +353,8 @@ const FacultyExports = () => {
         )}
       </Paper>
 
-      <Grid container spacing={3}>
-        <Grid item xs={12} lg={7}>
+      <Grid container spacing={3} sx={{ width: "100%", m: 0 }}>
+        <Grid item xs={12} lg={isPreviewActive ? 12 : 7} sx={{ width: "100%" }}>
           <Paper
             sx={{
               p: 2.5,
@@ -300,7 +367,8 @@ const FacultyExports = () => {
             <Stack
               direction={{ xs: "column", sm: "row" }}
               spacing={1.5}
-              alignItems={{ sm: "center" }}
+              alignItems={{ xs: "flex-start", sm: "center" }}
+              justifyContent="space-between"
               mb={2}
             >
               <Box>
@@ -311,7 +379,13 @@ const FacultyExports = () => {
                   All faculty submissions, tracked and ready to review.
                 </Typography>
               </Box>
-              <Stack direction="row" spacing={1} sx={{ ml: { sm: "auto" } }} flexWrap="wrap">
+              <Stack
+                direction="row"
+                spacing={1}
+                sx={{ ml: { sm: "auto" } }}
+                justifyContent={{ xs: "flex-start", sm: "flex-end" }}
+                flexWrap="wrap"
+              >
                 <Chip
                   label={`${exportsList.length} total`}
                   variant="outlined"
@@ -328,6 +402,68 @@ const FacultyExports = () => {
             </Stack>
             {exportsList.length === 0 ? (
               <Alert severity="warning">No exports uploaded yet.</Alert>
+            ) : isMobile ? (
+              <Stack spacing={2}>
+                {exportsList.map((item) => (
+                  <Paper
+                    key={item.id}
+                    sx={{
+                      p: 2,
+                      borderRadius: 3,
+                      border: `1px solid ${borderSoft}`,
+                      background: alpha(surface, isDark ? 0.85 : 0.98),
+                    }}
+                  >
+                    <Stack spacing={0.6}>
+                      <Typography sx={{ fontWeight: 700 }}>{item.file_name}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {item.uploaded_by_email || "Unknown uploader"}
+                      </Typography>
+                      <Stack direction="row" spacing={1} flexWrap="wrap">
+                        <Chip
+                          label={`Faculty: ${item.faculty_id || "N/A"}`}
+                          size="small"
+                          variant="outlined"
+                        />
+                        <Chip
+                          label={`Rows: ${item.row_count ?? "N/A"}`}
+                          size="small"
+                          color="info"
+                          variant={isDark ? "outlined" : "filled"}
+                        />
+                        <Chip
+                          label={`Size: ${formatBytes(item.file_size || 0)}`}
+                          size="small"
+                          variant="outlined"
+                        />
+                      </Stack>
+                      <Typography variant="caption" color="text.secondary">
+                        Uploaded: {new Date(item.created_at).toLocaleString()}
+                      </Typography>
+                    </Stack>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" mt={1.5}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<VisibilityRoundedIcon />}
+                        onClick={() => handlePreview(item)}
+                        disabled={previewLoadingId === item.id}
+                      >
+                        Preview
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        startIcon={<DownloadRoundedIcon />}
+                        onClick={() => handleDownload(item)}
+                        disabled={downloadingId === item.id}
+                      >
+                        Download
+                      </Button>
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
             ) : (
               <TableContainer
                 sx={{
@@ -345,16 +481,25 @@ const FacultyExports = () => {
                           : "linear-gradient(90deg, rgba(226,232,240,0.9), rgba(241,245,249,0.7))",
                       }}
                     >
-                      {["File", "Faculty", "Rows", "Size", "Uploaded", "Actions"].map((header) => (
+                      {[
+                        { label: "File" },
+                        { label: "Faculty" },
+                        { label: "Rows" },
+                        { label: "Size" },
+                        { label: "Uploaded" },
+                        { label: "Actions", align: "right" },
+                      ].map((header) => (
                         <TableCell
-                          key={header}
+                          key={header.label}
+                          align={header.align || "left"}
                           sx={{
                             fontWeight: 700,
                             color: textPrimary,
                             borderBottom: `1px solid ${borderSoft}`,
+                            whiteSpace: "nowrap",
                           }}
                         >
-                          {header}
+                          {header.label}
                         </TableCell>
                       ))}
                     </TableRow>
@@ -415,8 +560,8 @@ const FacultyExports = () => {
                             {new Date(item.created_at).toLocaleTimeString()}
                           </Typography>
                         </TableCell>
-                        <TableCell>
-                          <Stack direction="row" spacing={1}>
+                        <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                          <Stack direction="row" spacing={1} justifyContent="flex-end">
                             <Tooltip title="Preview">
                               <span>
                                 <IconButton
@@ -462,15 +607,17 @@ const FacultyExports = () => {
           </Paper>
         </Grid>
 
-        <Grid item xs={12} lg={5}>
+        <Grid item xs={12} lg={isPreviewActive ? 12 : 5} sx={{ width: "100%" }}>
           <Paper
             sx={{
               p: 2.5,
-              minHeight: 360,
+              minHeight: { xs: "auto", sm: 360 },
               borderRadius: 3,
               border: `1px solid ${borderSoft}`,
               boxShadow: panelShadow,
               bgcolor: alpha(surface, isDark ? 0.88 : 0.99),
+              width: "100%",
+              maxWidth: "none",
             }}
           >
             <Typography variant="h6" mb={1}>
@@ -486,40 +633,135 @@ const FacultyExports = () => {
             {previewMeta && previewHeaders.length > 0 && (
               <>
                 <Stack spacing={0.5} mb={2}>
-                  <Typography variant="subtitle2" fontWeight={600}>
+                  <Typography
+                    variant="subtitle2"
+                    fontWeight={600}
+                    sx={{ wordBreak: "break-word" }}
+                  >
                     {previewMeta.file_name}
                   </Typography>
-                  <Typography variant="caption" color="text.secondary">
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ wordBreak: "break-word" }}
+                  >
                     Faculty {previewMeta.faculty_id || "N/A"} -{" "}
                     {new Date(previewMeta.created_at).toLocaleString()}
                   </Typography>
                 </Stack>
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                  Rows shown: {previewRows.length || 0}
-                </Typography>
+                <Stack
+                  direction={{ xs: "column", sm: "row" }}
+                  spacing={1.5}
+                  alignItems={{ xs: "stretch", sm: "center" }}
+                  mb={1}
+                >
+                  <TextField
+                    size="small"
+                    fullWidth
+                    label="Search"
+                    placeholder="Search in preview"
+                    value={previewSearch}
+                    onChange={(event) => setPreviewSearch(event.target.value)}
+                  />
+                  <TextField
+                    size="small"
+                    select
+                    label="Risk"
+                    value={previewRiskFilter}
+                    onChange={(event) => setPreviewRiskFilter(event.target.value)}
+                    sx={{ minWidth: { xs: "100%", sm: 160 } }}
+                  >
+                    {["ALL", "HIGH", "MEDIUM", "LOW"].map((option) => (
+                      <MenuItem key={option} value={option}>
+                        {option}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Stack>
+                <Stack
+                  direction={{ xs: "column", sm: "row" }}
+                  spacing={1}
+                  alignItems={{ xs: "flex-start", sm: "center" }}
+                  justifyContent="space-between"
+                  mb={1}
+                >
+                  <Typography variant="caption" color="text.secondary">
+                    Rows shown: {filteredPreviewRows.length || 0}
+                  </Typography>
+                  <Stack direction="row" spacing={1} flexWrap="wrap">
+                    <Chip label={`Total ${previewCounts.total}`} size="small" variant="outlined" />
+                    <Chip label={`High ${previewCounts.high}`} size="small" color="error" />
+                    <Chip label={`Medium ${previewCounts.medium}`} size="small" color="warning" />
+                    <Chip label={`Low ${previewCounts.low}`} size="small" color="success" />
+                  </Stack>
+                </Stack>
                 <TableContainer
                   sx={{
-                    maxHeight: 360,
+                    maxHeight: { xs: "50vh", sm: 360 },
                     borderRadius: 2.5,
                     border: `1px solid ${borderSoft}`,
+                    overflowX: "auto",
+                    overflowY: "auto",
+                    width: "100%",
                   }}
                 >
-                  <Table size="small" stickyHeader>
+                  <Table size="small" stickyHeader sx={{ width: "100%", tableLayout: "auto" }}>
                     <TableHead>
                       <TableRow>
                         {previewHeaders.map((header) => (
-                          <TableCell key={header} sx={{ fontWeight: 600 }}>
+                          <TableCell
+                            key={header}
+                            sx={{ fontWeight: 600, whiteSpace: "nowrap" }}
+                          >
                             {header}
                           </TableCell>
                         ))}
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {previewRows.map((row, rowIndex) => (
+                      {filteredPreviewRows.map((row, rowIndex) => (
                         <TableRow key={`${previewMeta.id}-row-${rowIndex}`}>
                           {previewHeaders.map((_, cellIndex) => (
-                            <TableCell key={`${previewMeta.id}-cell-${rowIndex}-${cellIndex}`}>
-                              {row[cellIndex] ?? ""}
+                            <TableCell
+                              key={`${previewMeta.id}-cell-${rowIndex}-${cellIndex}`}
+                              sx={{ whiteSpace: "normal", wordBreak: "break-word" }}
+                            >
+                              {cellIndex === riskColumnIndex ? (
+                                <Chip
+                                  size="small"
+                                  label={String(row[cellIndex] || "N/A")}
+                                  color={
+                                    String(row[cellIndex] || "")
+                                      .trim()
+                                      .toUpperCase() === "HIGH"
+                                      ? "error"
+                                      : String(row[cellIndex] || "")
+                                          .trim()
+                                          .toUpperCase() === "MEDIUM"
+                                        ? "warning"
+                                        : String(row[cellIndex] || "")
+                                            .trim()
+                                            .toUpperCase() === "LOW"
+                                          ? "success"
+                                          : "default"
+                                  }
+                                  variant={
+                                    String(row[cellIndex] || "")
+                                      .trim()
+                                      .toUpperCase() === "HIGH" ||
+                                    String(row[cellIndex] || "")
+                                      .trim()
+                                      .toUpperCase() === "MEDIUM" ||
+                                    String(row[cellIndex] || "")
+                                      .trim()
+                                      .toUpperCase() === "LOW"
+                                      ? "filled"
+                                      : "outlined"
+                                  }
+                                />
+                              ) : (
+                                row[cellIndex] ?? ""
+                              )}
                             </TableCell>
                           ))}
                         </TableRow>

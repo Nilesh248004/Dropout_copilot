@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Typography, Paper, Chip, Button, TextField } from "@mui/material";
+import { Box, Typography, Paper, Chip, Button, TextField, Stack } from "@mui/material";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { getRiskLevel, getRiskScore } from "../utils/risk";
 
@@ -67,14 +67,22 @@ const StudentProfileDialog = ({ student }) => {
           sx={{ mt: 2 }}
         />
 
-        <Box mt={2} display="flex" gap={2}>
-          <Button variant="contained" color="success">
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mt={2}>
+          <Button
+            variant="contained"
+            color="success"
+            sx={{ width: { xs: "100%", sm: "auto" } }}
+          >
             Book Counselling
           </Button>
-          <Button variant="outlined" color="error">
+          <Button
+            variant="outlined"
+            color="error"
+            sx={{ width: { xs: "100%", sm: "auto" } }}
+          >
             Cancel
           </Button>
-        </Box>
+        </Stack>
       </Paper>
 
     </Box>

@@ -19,14 +19,14 @@ const MetricGauge = ({ label, value, max, color }) => {
     : 0;
   const displayValue = Number.isFinite(value)
     ? `${Math.round(value * 10) / 10}`
-    : "—";
+    : "--";
 
   return (
     <Stack spacing={0.6} alignItems="center">
       <Box
         sx={{
-          width: 86,
-          height: 86,
+          width: { xs: 72, sm: 86 },
+          height: { xs: 72, sm: 86 },
           borderRadius: "50%",
           background: `conic-gradient(${color} ${percent}%, ${alpha(color, 0.12)} ${percent}% 100%)`,
           display: "grid",
@@ -35,8 +35,8 @@ const MetricGauge = ({ label, value, max, color }) => {
       >
         <Box
           sx={{
-            width: 64,
-            height: 64,
+            width: { xs: 54, sm: 64 },
+            height: { xs: 54, sm: 64 },
             borderRadius: "50%",
             bgcolor: alpha(theme.palette.background.paper, isDark ? 0.8 : 0.95),
             border: `1px solid ${alpha(color, 0.25)}`,
@@ -140,7 +140,13 @@ const StudentInsightGrid = ({ students = [] }) => {
                   </Stack>
                 </Stack>
 
-                <Stack direction="row" spacing={2} justifyContent="space-between" flexWrap="wrap">
+                <Stack
+                  direction={{ xs: "column", sm: "row" }}
+                  spacing={{ xs: 1.5, sm: 2 }}
+                  justifyContent="space-between"
+                  alignItems={{ xs: "flex-start", sm: "center" }}
+                  flexWrap="wrap"
+                >
                   <MetricGauge label="Risk %" value={riskPercent} max={100} color={riskColor} />
                   <MetricGauge
                     label="Attendance"

@@ -187,11 +187,11 @@ const StudentAnalytics = () => {
       {/* BASIC INFO */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2}>
-          <Grid item xs={6}>Reg No: {student.register_number}</Grid>
-          <Grid item xs={6}>Year: {student.year}</Grid>
-          <Grid item xs={6}>Semester: {student.semester}</Grid>
-          <Grid item xs={6}>Attendance: {student.attendance}%</Grid>
-          <Grid item xs={6}>CGPA: {student.cgpa}</Grid>
+          <Grid item xs={12} sm={6}>Reg No: {student.register_number}</Grid>
+          <Grid item xs={12} sm={6}>Year: {student.year}</Grid>
+          <Grid item xs={12} sm={6}>Semester: {student.semester}</Grid>
+          <Grid item xs={12} sm={6}>Attendance: {student.attendance}%</Grid>
+          <Grid item xs={12} sm={6}>CGPA: {student.cgpa}</Grid>
         </Grid>
       </Paper>
 
