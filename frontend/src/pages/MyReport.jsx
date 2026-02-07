@@ -380,7 +380,6 @@ const MyReport = () => {
 
     const assistantId = startAssistantMessage();
     let receivedToken = false;
-    let receivedAny = false;
 
     try {
       setChatLoading(true);
@@ -419,12 +418,10 @@ const MyReport = () => {
             return;
           }
           if (data?.type === "token") {
-            receivedAny = true;
             receivedToken = true;
             appendAssistantChunk(assistantId, data.token);
           }
           if (data?.type === "start") {
-            receivedAny = true;
           }
           if (data?.type === "error") {
             if (finished) return;
