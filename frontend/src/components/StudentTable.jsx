@@ -14,7 +14,7 @@ import { API_BASE_URL } from "../config/api";
 import { useRole } from "../context/RoleContext";
 import { filterStudentsByFaculty } from "../utils/faculty";
 
-const StudentTable = ({ refresh }) => {
+const StudentTable = ({ refresh, searchTerm = "" }) => {
   const { role, facultyId } = useRole();
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -55,6 +55,24 @@ const StudentTable = ({ refresh }) => {
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
   }, [fetchStudents]);
+
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const filteredStudents = normalizedSearch
+    ? students.filter((student) => {
+        const values = [
+          student?.name,
+          student?.register_number,
+          student?.phone_number,
+          student?.year,
+          student?.semester,
+          student?.faculty_id,
+          student?.risk_level,
+        ];
+        return values.some((value) =>
+          String(value ?? "").toLowerCase().includes(normalizedSearch)
+        );
+      })
+    : students;
 
   const handleDelete = async (id) => {
     if (!window.confirm("Delete student permanently?")) return;
@@ -115,7 +133,7 @@ const StudentTable = ({ refresh }) => {
             </TableHead>
 
             <TableBody>
-              {students.map((s) => (
+              {filteredStudents.map((s) => (
                 <TableRow key={s.id} hover>
                   <TableCell>{s.name}</TableCell>
                   <TableCell>{s.register_number}</TableCell>

@@ -7,9 +7,10 @@ router.get("/full", async (req, res) => {
     const result = await pool.query(`
       SELECT s.id, s.name, s.register_number, s.year, s.semester,
              a.attendance, a.cgpa, a.arrear_count, a.fees_paid,
-             a.dropout_risk AS risk_score, a.dropout_flag AS dropout_prediction, a.risk_level
+             a.dropout_risk AS risk_score, a.dropout_flag AS dropout_prediction, p.risk_level
       FROM students s
       LEFT JOIN academic_records a ON s.id = a.student_id
+      LEFT JOIN predictions p ON s.id = p.student_id
       ORDER BY s.id DESC
     `);
     res.json(result.rows);

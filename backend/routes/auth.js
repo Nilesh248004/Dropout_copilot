@@ -130,6 +130,66 @@ const sendEmail = async ({ to, subject, text }) => {
   if (!target) {
     throw new Error("Email address is required.");
   }
+  if (EMAIL_PROVIDER === "brevo") {
+    const { BREVO_API_KEY, BREVO_FROM, BREVO_FROM_NAME } = process.env;
+    if (!BREVO_API_KEY || !BREVO_FROM) {
+      throw new Error("Brevo credentials are not configured.");
+    }
+    try {
+      await axios.post(
+        "https://api.brevo.com/v3/smtp/email",
+        {
+          sender: {
+            name: BREVO_FROM_NAME || "Dropout Copilot",
+            email: BREVO_FROM,
+          },
+          to: [{ email: target }],
+          subject,
+          textContent: text,
+        },
+        {
+          headers: {
+            accept: "application/json",
+            "content-type": "application/json",
+            "api-key": BREVO_API_KEY,
+          },
+          timeout: 15000,
+        }
+      );
+      return;
+    } catch (err) {
+      const details = err.response?.data?.message || err.response?.data?.error;
+      throw new Error(details || err.message || "Brevo email failed.");
+    }
+  }
+  if (EMAIL_PROVIDER === "resend") {
+    const { RESEND_API_KEY, RESEND_FROM } = process.env;
+    if (!RESEND_API_KEY || !RESEND_FROM) {
+      throw new Error("Resend credentials are not configured.");
+    }
+    try {
+      await axios.post(
+        "https://api.resend.com/emails",
+        {
+          from: RESEND_FROM,
+          to: target,
+          subject,
+          text,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${RESEND_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          timeout: 15000,
+        }
+      );
+      return;
+    } catch (err) {
+      const details = err.response?.data?.message || err.response?.data?.error;
+      throw new Error(details || err.message || "Resend email failed.");
+    }
+  }
   if (EMAIL_PROVIDER === "smtp") {
     const {
       SMTP_HOST,

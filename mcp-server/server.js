@@ -713,12 +713,6 @@ const createCounsellingServer = () => {
   return server;
 };
 
-const mcpServer = createCounsellingServer();
-const transport = new StreamableHTTPServerTransport({
-  sessionIdGenerator: undefined,
-  enableJsonResponse: true,
-});
-
 const handleChatStream = async (req, res) => {
   if (req.method !== "POST") {
     res.writeHead(405);
@@ -841,7 +835,30 @@ const handler = async (req, res) => {
     req.headers["content-type"] = "application/json";
   }
 
-  await transport.handleRequest(req, res);
+  const originalUrl = req.url;
+  if (req.url?.startsWith(MCP_PATH)) {
+    const stripped = req.url.slice(MCP_PATH.length);
+    req.url = stripped && stripped.length > 0 ? stripped : "/";
+  }
+
+  const server = createCounsellingServer();
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
+
+  await server.connect(transport);
+
+  res.on("close", () => {
+    transport.close();
+    server.close();
+  });
+
+  try {
+    await transport.handleRequest(req, res);
+  } finally {
+    req.url = originalUrl;
+  }
 };
 
 const httpServer = createServer((req, res) => {
@@ -853,7 +870,6 @@ const httpServer = createServer((req, res) => {
 });
 
 const startServer = async () => {
-  await mcpServer.connect(transport);
   httpServer.listen(MCP_PORT, () => {
     console.log(`MCP counselling server running on http://localhost:${MCP_PORT}${MCP_PATH}`);
   });

@@ -2,6 +2,7 @@
 const router = require("express").Router();
 const pool = require("../db"); // PostgreSQL connection
 const axios = require("axios");
+const nodemailer = require("nodemailer");
 let openaiClientPromise;
 
 const getOpenAIClient = async () => {
@@ -20,6 +21,7 @@ const MCP_SERVER_URL = process.env.MCP_SERVER_URL || "http://localhost:8787/mcp"
 const MCP_SERVER_LABEL = process.env.MCP_SERVER_LABEL || "counselling";
 
 const normalizeFacultyId = (value) => (value || "").trim().toLowerCase();
+const normalizeEmail = (value) => (value || "").trim().toLowerCase();
 const AI_CACHE_TTL_MS = Number.parseInt(
   process.env.COUNSELLING_AI_CACHE_TTL_MS || "900000",
   10
@@ -36,6 +38,134 @@ const toPercent = (value) => {
   if (num === null) return null;
   return num > 1 ? Math.round(num) : Math.round(num * 100);
 };
+
+const formatFacultyNameFromEmail = (email) => {
+  const address = String(email || "").trim().toLowerCase();
+  const localPart = address.split("@")[0] || "";
+  const tokens = localPart
+    .split(/[._-]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!tokens.length) return "";
+  return tokens
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(" ");
+};
+
+const sendEmail = async ({ to, subject, text }) => {
+  const target = normalizeEmail(to);
+  if (!target) {
+    throw new Error("Email address is required.");
+  }
+
+  const provider = String(process.env.EMAIL_PROVIDER || "").toLowerCase();
+  if (provider === "brevo") {
+    const { BREVO_API_KEY, BREVO_FROM, BREVO_FROM_NAME } = process.env;
+    if (!BREVO_API_KEY || !BREVO_FROM) {
+      throw new Error("Brevo credentials are not configured.");
+    }
+    try {
+      await axios.post(
+        "https://api.brevo.com/v3/smtp/email",
+        {
+          sender: {
+            name: BREVO_FROM_NAME || "Dropout Copilot",
+            email: BREVO_FROM,
+          },
+          to: [{ email: target }],
+          subject,
+          textContent: text,
+        },
+        {
+          headers: {
+            "api-key": BREVO_API_KEY,
+            "content-type": "application/json",
+          },
+        }
+      );
+      return;
+    } catch (err) {
+      const details = err.response?.data?.message;
+      throw new Error(details || err.message || "Brevo email failed.");
+    }
+  }
+
+  if (provider === "resend") {
+    const { RESEND_API_KEY, RESEND_FROM } = process.env;
+    if (!RESEND_API_KEY || !RESEND_FROM) {
+      throw new Error("Resend credentials are not configured.");
+    }
+    try {
+      await axios.post(
+        "https://api.resend.com/emails",
+        {
+          from: RESEND_FROM,
+          to: [target],
+          subject,
+          text,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${RESEND_API_KEY}`,
+            "content-type": "application/json",
+          },
+        }
+      );
+      return;
+    } catch (err) {
+      const details = err.response?.data?.message;
+      throw new Error(details || err.message || "Resend email failed.");
+    }
+  }
+
+  if (provider === "smtp") {
+    const {
+      SMTP_HOST,
+      SMTP_PORT,
+      SMTP_USER,
+      SMTP_PASS,
+      SMTP_FROM,
+      SMTP_SECURE,
+    } = process.env;
+    if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS || !SMTP_FROM) {
+      throw new Error("SMTP credentials are not configured.");
+    }
+    const transporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: Number(SMTP_PORT),
+      secure: String(SMTP_SECURE || "").toLowerCase() === "true" || Number(SMTP_PORT) === 465,
+      auth: {
+        user: SMTP_USER,
+        pass: SMTP_PASS,
+      },
+    });
+    await transporter.sendMail({
+      from: SMTP_FROM,
+      to: target,
+      subject,
+      text,
+    });
+    return;
+  }
+
+  if (provider === "log") {
+    console.log(`[EMAIL][${target}] ${subject}\n${text}`);
+    return;
+  }
+
+  throw new Error("Email provider is not configured.");
+};
+
+const resolveRiskLevel = (riskLevel, riskScore) => {
+  const normalized = String(riskLevel || "").trim().toUpperCase();
+  if (normalized) return normalized;
+  if (riskScore === null) return "UNKNOWN";
+  if (riskScore > 0.7) return "HIGH";
+  if (riskScore > 0.4) return "MEDIUM";
+  return "LOW";
+};
+
+const isHighOrMedium = (riskLevel) => ["HIGH", "MEDIUM"].includes(riskLevel);
 
 const getTrend = (historyRows = []) => {
   if (!Array.isArray(historyRows) || historyRows.length < 2) {
@@ -428,7 +558,7 @@ router.post("/book", async (req, res) => {
 
     // Prevent duplicate open requests
     const existing = await pool.query(
-      "SELECT * FROM counselling_requests WHERE student_id=$1 AND status='PENDING'",
+      "SELECT * FROM counselling_requests WHERE student_id=$1 AND status IN ('PENDING','SCHEDULED')",
       [student_id]
     );
 
@@ -449,6 +579,216 @@ router.post("/book", async (req, res) => {
 
   } catch (err) {
     console.error("❌ Counselling Book Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================= ASSIGN COUNSELLING SESSION =================
+router.post("/assign", async (req, res) => {
+  try {
+    const {
+      student_id,
+      faculty_id,
+      scheduled_at,
+      meet_link,
+      classroom,
+      reason,
+      counselling_mode,
+    } = req.body;
+
+    const id = Number(student_id);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ error: "student_id is required" });
+    }
+    const normalizedFacultyId = normalizeFacultyId(faculty_id);
+    if (!normalizedFacultyId) {
+      return res.status(400).json({ error: "faculty_id is required" });
+    }
+    const trimmedLink = String(meet_link || "").trim();
+    const trimmedClassroom = String(classroom || "").trim();
+    const scheduledAt = scheduled_at ? new Date(scheduled_at) : null;
+    if (!scheduledAt || Number.isNaN(scheduledAt.getTime())) {
+      return res.status(400).json({ error: "scheduled_at is required" });
+    }
+
+    const studentResult = await pool.query(
+      `
+      SELECT s.id, s.faculty_id,
+             a.dropout_risk AS risk_score,
+             p.risk_level
+      FROM students s
+      LEFT JOIN academic_records a ON s.id = a.student_id
+      LEFT JOIN predictions p ON s.id = p.student_id
+      WHERE s.id = $1
+      `,
+      [id]
+    );
+    if (!studentResult.rows.length) {
+      return res.status(404).json({ error: "Student not found" });
+    }
+    const student = studentResult.rows[0];
+    const studentFacultyId = normalizeFacultyId(student.faculty_id);
+    if (studentFacultyId && studentFacultyId !== normalizedFacultyId) {
+      return res.status(403).json({ error: "Faculty ID does not match student's mapped faculty." });
+    }
+
+    const riskScore = toNumber(student.risk_score);
+    const resolvedRisk = resolveRiskLevel(student.risk_level, riskScore);
+    if (!isHighOrMedium(resolvedRisk)) {
+      return res.status(400).json({
+        error: "Counselling can only be assigned for high or medium risk students.",
+      });
+    }
+    const requestedMode = String(counselling_mode || "").trim().toUpperCase();
+    const hasRequestedMode = requestedMode === "ONLINE" || requestedMode === "OFFLINE";
+    const inferredMode = trimmedClassroom ? "OFFLINE" : trimmedLink ? "ONLINE" : null;
+    const counsellingMode = hasRequestedMode
+      ? requestedMode
+      : inferredMode || (resolvedRisk === "HIGH" ? "OFFLINE" : "ONLINE");
+    if (counsellingMode === "ONLINE" && !trimmedLink) {
+      return res.status(400).json({ error: "meet_link is required for online counselling." });
+    }
+    if (counsellingMode === "OFFLINE" && !trimmedClassroom) {
+      return res.status(400).json({ error: "classroom is required for offline counselling." });
+    }
+
+    const existing = await pool.query(
+      `
+      SELECT id
+      FROM counselling_requests
+      WHERE student_id = $1 AND status IN ('PENDING', 'SCHEDULED')
+      ORDER BY request_date DESC
+      LIMIT 1
+      `,
+      [id]
+    );
+
+    const facultyLabel = String(normalizedFacultyId);
+    const safeReason = String(reason || "").trim() || "Faculty assigned counselling";
+    let result;
+
+    if (existing.rows.length > 0) {
+      const requestId = existing.rows[0].id;
+      result = await pool.query(
+        `
+        UPDATE counselling_requests
+        SET status = 'SCHEDULED',
+            scheduled_at = $1,
+            meet_link = $2,
+            classroom = $3,
+            counselling_mode = $4,
+            reason = $5,
+            faculty_label = $6,
+            faculty_id = $7
+        WHERE id = $8
+        RETURNING id, student_id, status, scheduled_at, meet_link, classroom, counselling_mode, request_date, faculty_label
+        `,
+        [
+          scheduledAt.toISOString(),
+          counsellingMode === "ONLINE" ? trimmedLink : null,
+          counsellingMode === "OFFLINE" ? trimmedClassroom : null,
+          counsellingMode,
+          safeReason,
+          facultyLabel,
+          normalizedFacultyId,
+          requestId,
+        ]
+      );
+    } else {
+      result = await pool.query(
+        `
+        INSERT INTO counselling_requests (
+          student_id,
+          reason,
+          status,
+          request_date,
+          faculty_label,
+          faculty_id,
+          scheduled_at,
+          meet_link,
+          classroom,
+          counselling_mode
+        )
+        VALUES ($1, $2, 'SCHEDULED', NOW(), $3, $4, $5, $6, $7, $8)
+        RETURNING id, student_id, status, scheduled_at, meet_link, classroom, counselling_mode, request_date, faculty_label
+        `,
+        [
+          id,
+          safeReason,
+          facultyLabel,
+          normalizedFacultyId,
+          scheduledAt.toISOString(),
+          counsellingMode === "ONLINE" ? trimmedLink : null,
+          counsellingMode === "OFFLINE" ? trimmedClassroom : null,
+          counsellingMode,
+        ]
+      );
+    }
+
+    const scheduled = result.rows[0] || {};
+    try {
+      const emailResult = await pool.query(
+        `
+        SELECT u.email, s.name, s.register_number
+        FROM students s
+        JOIN app_users u
+          ON LOWER(u.student_id) = LOWER(s.register_number)
+        WHERE s.id = $1 AND u.role = 'student'
+        LIMIT 1
+        `,
+        [id]
+      );
+      if (emailResult.rows.length) {
+        const student = emailResult.rows[0];
+        const when = scheduled.scheduled_at
+          ? new Date(scheduled.scheduled_at).toLocaleString()
+          : "scheduled time";
+        const mode = scheduled.counselling_mode || counsellingMode;
+        const facultyEmailResult = await pool.query(
+          `
+          SELECT email
+          FROM app_users
+          WHERE role = 'faculty'
+            AND LOWER(TRIM(faculty_id)) = LOWER(TRIM($1))
+          LIMIT 1
+          `,
+          [normalizedFacultyId]
+        );
+        const facultyEmail = facultyEmailResult.rows[0]?.email || "";
+        const extractedName = formatFacultyNameFromEmail(facultyEmail);
+        const facultyIdLabel = String(
+          facultyLabel || normalizedFacultyId || ""
+        ).trim();
+        const facultyName =
+          extractedName ||
+          String(scheduled.faculty_label || facultyLabel || normalizedFacultyId || "Faculty");
+        const regardsLine = facultyIdLabel ? `${facultyName} (${facultyIdLabel})` : facultyName;
+        const location =
+          mode === "OFFLINE"
+            ? `Classroom: ${scheduled.classroom || trimmedClassroom}`
+            : `Meet link: ${scheduled.meet_link || trimmedLink}`;
+        await sendEmail({
+          to: student.email,
+          subject: "Counselling session scheduled",
+          text:
+            `Hi ${student.name || "Student"},\n\n` +
+            `Your counselling session has been scheduled.\n` +
+            `Mode: ${mode}\n` +
+            `When: ${when}\n` +
+            `${location}\n\n` +
+            `Regards,\n${regardsLine}`,
+        });
+      }
+    } catch (err) {
+      console.error("❌ Counselling email error:", err.message);
+    }
+
+    res.json({
+      message: "Counselling session scheduled",
+      ...scheduled,
+    });
+  } catch (err) {
+    console.error("❌ Assign Counselling Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -500,7 +840,7 @@ router.put("/:id", async (req, res) => {
     const { status } = req.body;
 
     const nextStatus = String(status || "").trim().toUpperCase();
-    const allowed = ["PENDING", "COMPLETED", "CANCELLED"];
+    const allowed = ["PENDING", "SCHEDULED", "COMPLETED", "CANCELLED"];
     if (!allowed.includes(nextStatus)) {
       return res.status(400).json({ error: "Invalid status" });
     }

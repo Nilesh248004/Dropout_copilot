@@ -48,6 +48,7 @@ print("✅ Scaler Feature Count:", scaler.n_features_in_)
 # Risk thresholds (optional)
 # ============================
 risk_thresholds = {"low": 0.4, "high": 0.7}
+prediction_threshold = 0.5
 if METRICS_PATH.exists():
     try:
         with open(METRICS_PATH, "r", encoding="utf-8") as f:
@@ -59,6 +60,9 @@ if METRICS_PATH.exists():
                 "high": float(thresholds["high"]),
             }
             print("✅ Loaded risk thresholds:", risk_thresholds)
+        if "prediction_threshold" in metrics:
+            prediction_threshold = float(metrics["prediction_threshold"])
+            print("✅ Loaded prediction threshold:", prediction_threshold)
     except Exception as e:
         print("⚠️ Failed to load thresholds:", e)
 
@@ -113,62 +117,41 @@ def root():
 def predict(student: StudentData):
     try:
         # ----------------------------
-        # Raw Features
+        # Rule-Based Risk Scoring
         # ----------------------------
-        x = np.array([[
-            student.attendance,
-            student.cgpa,
-            student.arrear_count,
-            student.fees_paid,
-            student.disciplinary_issues,
-            student.year,
-            student.semester
-        ]])
+        is_high = False
+        is_medium = False
 
-        # ----------------------------
-        # Feature Engineering
-        # ----------------------------
-        low_attendance = int(student.attendance < 60)
-        low_cgpa = int(student.cgpa < 5)
-        high_arrears = int(student.arrear_count > 3)
-        financial_risk = int(student.fees_paid == 0)
-        behavior_risk = student.disciplinary_issues
+        if student.attendance < 60:
+            is_high = True
+        if student.cgpa < 5:
+            is_high = True
+        if student.disciplinary_issues >= 2:
+            is_high = True
+        if student.fees_paid == 0 and student.attendance < 75:
+            is_high = True
 
-        x_fe = np.concatenate([
-            x,
-            [[low_attendance, low_cgpa, high_arrears, financial_risk, behavior_risk]]
-        ], axis=1)
+        if not is_high:
+            if 60 <= student.attendance <= 70:
+                is_medium = True
+            if 5 <= student.cgpa < 6:
+                is_medium = True
+            if student.disciplinary_issues == 1:
+                is_medium = True
+            if student.fees_paid == 0:
+                is_medium = True
 
-        # ----------------------------
-        # Scale Features
-        # ----------------------------
-        x_scaled = scaler.transform(x_fe)
-
-        # ----------------------------
-        # Predict
-        # ----------------------------
-        pred = int(model.predict(x_scaled)[0])
-        prob = float(model.predict_proba(x_scaled)[0][1])
-
-        # ----------------------------
-        # Adjusted Risk Score (rules)
-        # ----------------------------
-        adjusted_prob = prob
-        if student.arrear_count > 2:
-            # enforce higher risk score when arrears are high
-            adjusted_prob = max(adjusted_prob, 0.85)
-
-        # ----------------------------
-        # Risk Level Logic
-        # ----------------------------
-        if student.arrear_count > 2:
+        if is_high:
             risk_level = "HIGH"
-        elif adjusted_prob >= risk_thresholds["high"]:
-            risk_level = "HIGH"
-        elif adjusted_prob >= risk_thresholds["low"]:
+            adjusted_prob = 0.85
+        elif is_medium:
             risk_level = "MEDIUM"
+            adjusted_prob = 0.55
         else:
             risk_level = "LOW"
+            adjusted_prob = 0.2
+
+        pred = int(risk_level in {"HIGH", "MEDIUM"})
 
         return {
             "dropout_prediction": pred,

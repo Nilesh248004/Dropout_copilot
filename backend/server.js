@@ -56,6 +56,15 @@ const toNumberOrNull = (value) => {
   return Number.isFinite(num) ? num : null;
 };
 
+const resolveRiskLevel = (level, score) => {
+  const normalized = String(level || "").trim().toUpperCase();
+  if (normalized) return normalized;
+  if (score === null) return "";
+  if (score > 0.7) return "HIGH";
+  if (score > 0.4) return "MEDIUM";
+  return "LOW";
+};
+
 const resetPredictionForStudent = async (studentId) => {
   await pool.query(
     `
@@ -286,6 +295,34 @@ app.get("/students/:id/full", async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     console.error("GET student full ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================= WEEKLY RISK HISTORY (ALL STUDENTS AVG) =================
+app.get("/students/risk/history", async (req, res) => {
+  try {
+    const { faculty_id } = req.query;
+    const normalizedFacultyId = normalizeFacultyId(faculty_id);
+    const params = [];
+    const facultyFilter = normalizedFacultyId ? "WHERE LOWER(TRIM(s.faculty_id)) = $1" : "";
+    if (normalizedFacultyId) params.push(normalizedFacultyId);
+    const result = await pool.query(
+      `
+      SELECT
+        TO_CHAR(ph.predicted_at, 'Week WW') AS week,
+        AVG(ph.dropout_risk) AS avg_risk
+      FROM prediction_history ph
+      JOIN students s ON s.id = ph.student_id
+      ${facultyFilter}
+      GROUP BY week
+      ORDER BY week;
+      `,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET risk history ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -746,6 +783,45 @@ app.post("/predict/:student_id", async (req, res) => {
       [student_id, risk_score, risk_level]
     );
 
+    const resolvedLevel = resolveRiskLevel(risk_level, toNumberOrNull(risk_score));
+    if (["HIGH", "MEDIUM"].includes(resolvedLevel)) {
+      await client.query(
+        `
+        UPDATE counselling_requests
+        SET status = 'PENDING',
+            request_date = NOW()
+        WHERE id IN (
+          SELECT id
+          FROM counselling_requests
+          WHERE student_id = $1
+            AND (meet_link IS NOT NULL OR scheduled_at IS NOT NULL)
+          ORDER BY request_date DESC
+          LIMIT 1
+        )
+          AND status IN ('COMPLETED', 'CANCELLED')
+        `,
+        [student_id]
+      );
+    } else if (resolvedLevel === "LOW") {
+      await client.query(
+        `
+        UPDATE counselling_requests
+        SET status = 'CANCELLED',
+            request_date = NOW()
+        WHERE id IN (
+          SELECT id
+          FROM counselling_requests
+          WHERE student_id = $1
+            AND (meet_link IS NOT NULL OR scheduled_at IS NOT NULL)
+          ORDER BY request_date DESC
+          LIMIT 1
+        )
+          AND status IN ('PENDING', 'SCHEDULED', 'COMPLETED')
+        `,
+        [student_id]
+      );
+    }
+
     await client.query("COMMIT");
 
     // ✅ Return a clean response
@@ -788,31 +864,6 @@ const exportRoutes = require("./routes/exports");
 app.use("/exports", exportRoutes);
 
 
-
-
-app.get("/students/risk/history", async (req, res) => {
-  try {
-    const { faculty_id } = req.query;
-    const normalizedFacultyId = normalizeFacultyId(faculty_id);
-    const params = [];
-    const facultyFilter = normalizedFacultyId ? "WHERE LOWER(TRIM(s.faculty_id)) = $1" : "";
-    if (normalizedFacultyId) params.push(normalizedFacultyId);
-    const result = await pool.query(`
-      SELECT 
-        TO_CHAR(ph.predicted_at, 'Week WW') AS week,
-        AVG(ph.dropout_risk) AS avg_risk
-      FROM prediction_history ph
-      JOIN students s ON s.id = ph.student_id
-      ${facultyFilter}
-      GROUP BY week
-      ORDER BY week;
-    `, params);
-    res.json(result.rows);
-  } catch (err) {
-    console.error("GET risk history ERROR:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 
 // ================= WEBSOCKET CHAT STREAM =================
@@ -891,11 +942,14 @@ wsServer.on("connection", (ws) => {
     const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
     const streamUrl = `${normalizeBaseUrl(mcpUrl)}/chat/stream`;
 
+    // Let the client know the stream has started to avoid premature timeout.
+    send({ type: "start", request_id: requestId });
+
     try {
       const response = await axios.post(
         streamUrl,
         { student_id: id, question: prompt },
-        { headers, responseType: "stream", timeout: 30000 }
+        { headers, responseType: "stream", timeout: 60000 }
       );
 
       upstream = response.data;

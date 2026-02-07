@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import ExtraTreesClassifier, GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score, precision_recall_curve
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
@@ -184,6 +184,13 @@ def main():
         if hasattr(best_model, "predict_proba")
         else best_model.predict(x_test_scaled)
     )
+    precision, recall, thresholds = precision_recall_curve(y_test, best_probas)
+    f1_scores = (2 * precision * recall) / (precision + recall + 1e-9)
+    if thresholds.size > 0:
+        best_idx = int(np.argmax(f1_scores[:-1]))
+        best_threshold = float(thresholds[best_idx])
+    else:
+        best_threshold = 0.5
     low_threshold = float(np.quantile(best_probas, 0.33))
     high_threshold = float(np.quantile(best_probas, 0.67))
 
@@ -197,6 +204,7 @@ def main():
         "low": low_threshold,
         "high": high_threshold,
     }
+    results["prediction_threshold"] = best_threshold
 
     with METRICS_PATH.open("w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)

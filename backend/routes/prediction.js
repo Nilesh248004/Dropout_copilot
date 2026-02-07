@@ -2,6 +2,20 @@
 const router = require("express").Router();
 const pool = require("../db");
 
+const toNumber = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const resolveRiskLevel = (level, score) => {
+  const normalized = String(level || "").trim().toUpperCase();
+  if (normalized) return normalized;
+  if (score === null) return "";
+  if (score > 0.7) return "HIGH";
+  if (score > 0.4) return "MEDIUM";
+  return "LOW";
+};
+
 // ================= SAVE PREDICTION =================
 router.post("/save", async (req, res) => {
   try {
@@ -47,6 +61,45 @@ router.post("/save", async (req, res) => {
       `,
       [student_id, risk_score, risk_level]
     );
+
+    const resolvedLevel = resolveRiskLevel(risk_level, toNumber(risk_score));
+    if (["HIGH", "MEDIUM"].includes(resolvedLevel)) {
+      await pool.query(
+        `
+        UPDATE counselling_requests
+        SET status = 'PENDING',
+            request_date = NOW()
+        WHERE id IN (
+          SELECT id
+          FROM counselling_requests
+          WHERE student_id = $1
+            AND (meet_link IS NOT NULL OR scheduled_at IS NOT NULL)
+          ORDER BY request_date DESC
+          LIMIT 1
+        )
+          AND status IN ('COMPLETED', 'CANCELLED')
+        `,
+        [student_id]
+      );
+    } else if (resolvedLevel === "LOW") {
+      await pool.query(
+        `
+        UPDATE counselling_requests
+        SET status = 'CANCELLED',
+            request_date = NOW()
+        WHERE id IN (
+          SELECT id
+          FROM counselling_requests
+          WHERE student_id = $1
+            AND (meet_link IS NOT NULL OR scheduled_at IS NOT NULL)
+          ORDER BY request_date DESC
+          LIMIT 1
+        )
+          AND status IN ('PENDING', 'SCHEDULED', 'COMPLETED')
+        `,
+        [student_id]
+      );
+    }
 
     console.log("📥 Prediction Saved:", { student_id, risk_score, risk_level, dropout });
     res.json({ message: "Prediction saved successfully" });

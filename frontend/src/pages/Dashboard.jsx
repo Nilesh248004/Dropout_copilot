@@ -62,6 +62,7 @@ const Dashboard = () => {
   const [facultyFilter, setFacultyFilter] = useState("All Faculties");
   const [adminSearchQuery, setAdminSearchQuery] = useState("");
   const [adminSearchTerm, setAdminSearchTerm] = useState("");
+  const [studentSearchTerm, setStudentSearchTerm] = useState("");
   const [counsellingRequests, setCounsellingRequests] = useState([]);
   const [counsellingLoading, setCounsellingLoading] = useState(false);
   const [counsellingError, setCounsellingError] = useState(null);
@@ -543,6 +544,8 @@ const Dashboard = () => {
 
   const counsellingStatusColor = (status) => {
     switch (status?.toUpperCase()) {
+      case "SCHEDULED":
+        return "info";
       case "COMPLETED":
         return "success";
       case "CANCELLED":
@@ -571,6 +574,23 @@ const Dashboard = () => {
   const filteredByFaculty = facultyFilter === "All Faculties"
     ? students
     : students.filter((student) => getFacultyForStudent(student) === facultyFilter);
+  const normalizedStudentSearch = studentSearchTerm.trim().toLowerCase();
+  const studentManagementStudents = normalizedStudentSearch
+    ? students.filter((student) => {
+        const values = [
+          student?.name,
+          student?.register_number,
+          student?.phone_number,
+          student?.year,
+          student?.semester,
+          student?.faculty_id,
+          student?.risk_level,
+        ];
+        return values.some((value) =>
+          String(value ?? "").toLowerCase().includes(normalizedStudentSearch)
+        );
+      })
+    : students;
 
   const studentScopedRequests = studentRecord
     ? counsellingRequests.filter((request) => {
@@ -592,6 +612,31 @@ const Dashboard = () => {
         );
       })
     : counsellingRequests;
+  const studentSupportRequests = studentScopedRequests.filter((request) => {
+    const meetLink = String(request.meet_link || "").trim();
+    return meetLink.length === 0;
+  });
+  const facultySupportRequests = facultyScopedRequests.filter((request) => {
+    const meetLink = String(request.meet_link || "").trim();
+    return meetLink.length === 0;
+  });
+  const studentScheduledSessions = studentScopedRequests.filter(
+    (request) => String(request.status || "").toUpperCase() === "SCHEDULED"
+  );
+  const nextStudentSession = useMemo(() => {
+    if (!studentScheduledSessions.length) return null;
+    const sorted = [...studentScheduledSessions].sort((a, b) => {
+      const aDate = new Date(a.scheduled_at || a.request_date || 0).getTime();
+      const bDate = new Date(b.scheduled_at || b.request_date || 0).getTime();
+      return aDate - bDate;
+    });
+    const now = Date.now();
+    const upcoming = sorted.find(
+      (session) =>
+        new Date(session.scheduled_at || session.request_date || 0).getTime() >= now
+    );
+    return upcoming || sorted[0] || null;
+  }, [studentScheduledSessions]);
   const pendingRequestsCount = facultyScopedRequests.filter(
     (request) => String(request.status || "").toUpperCase() === "PENDING"
   ).length;
@@ -621,6 +666,13 @@ const Dashboard = () => {
   const hasStudentPrediction =
     Boolean(studentRiskLevel) && ["HIGH", "MEDIUM", "LOW"].includes(studentRiskLevel);
   const highRiskStudents = students.filter((s) => getRiskLevel(s) === "HIGH");
+  const nextSessionIsOffline =
+    String(nextStudentSession?.counselling_mode || "").toUpperCase() === "OFFLINE";
+  const nextSessionLocation = nextStudentSession
+    ? nextSessionIsOffline
+      ? `Classroom ${nextStudentSession.classroom || "TBA"}`
+      : "Online via Google Meet"
+    : "";
   const facultyDisplayName = useMemo(() => {
     if (!email) return "Faculty Member";
     const handle = email.split("@")[0];
@@ -1055,6 +1107,80 @@ const Dashboard = () => {
             )}
           </Paper>
 
+          {studentRecord && nextStudentSession && (
+            <Paper
+              sx={{
+                ...sectionPaperSx,
+                position: "relative",
+                overflow: "hidden",
+                border: `1px solid ${alpha(primaryMain, 0.25)}`,
+                background: `linear-gradient(140deg, ${alpha(primaryLight, 0.18)} 0%, ${alpha(surface, 0.92)} 70%)`,
+              }}
+            >
+              <Box
+                sx={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 6,
+                  background: "linear-gradient(90deg, #0ea5e9, #22d3ee, #38bdf8)",
+                }}
+              />
+              <Stack
+                direction={{ xs: "column", md: "row" }}
+                spacing={2}
+                alignItems={{ md: "center" }}
+                justifyContent="space-between"
+              >
+                <Box>
+                  <Typography variant="overline" sx={{ letterSpacing: 3, color: "text.secondary" }}>
+                    Counselling Alert
+                  </Typography>
+                  <Typography variant="h6" mb={0.5}>Your counselling session is scheduled</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {formatRequestDate(nextStudentSession.scheduled_at || nextStudentSession.request_date)}
+                    {nextSessionLocation ? ` - ${nextSessionLocation}` : ""}
+                  </Typography>
+                  <Stack direction="row" spacing={1} mt={1} flexWrap="wrap">
+                    <Chip
+                      size="small"
+                      label={nextSessionIsOffline ? "Offline" : "Online"}
+                      color={nextSessionIsOffline ? "warning" : "primary"}
+                      variant="outlined"
+                    />
+                    <Chip
+                      size="small"
+                      label={`Status: ${nextStudentSession.status || "SCHEDULED"}`}
+                      variant="outlined"
+                    />
+                  </Stack>
+                </Box>
+                {nextSessionIsOffline ? (
+                  <Chip
+                    label={nextStudentSession.classroom ? `Room ${nextStudentSession.classroom}` : "Room TBA"}
+                    color="warning"
+                    variant="outlined"
+                  />
+                ) : nextStudentSession.meet_link ? (
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    component="a"
+                    href={nextStudentSession.meet_link}
+                    target="_blank"
+                    rel="noreferrer"
+                    sx={{ textTransform: "none", borderRadius: 999 }}
+                  >
+                    Join Meet
+                  </Button>
+                ) : (
+                  <Chip label="Meet link pending" color="info" variant="outlined" />
+                )}
+              </Stack>
+            </Paper>
+          )}
+
           <Paper
             sx={{
               ...sectionPaperSx,
@@ -1173,7 +1299,7 @@ const Dashboard = () => {
               </Box>
               <Chip
                 size="small"
-                label={`Total: ${studentScopedRequests.length}`}
+                label={`Total: ${studentSupportRequests.length}`}
                 variant="outlined"
               />
             </Stack>
@@ -1185,12 +1311,12 @@ const Dashboard = () => {
                 <CircularProgress size={24} />
               </Box>
             )}
-            {studentRecord && !counsellingLoading && studentScopedRequests.length === 0 && (
+            {studentRecord && !counsellingLoading && studentSupportRequests.length === 0 && (
               <Alert severity="info">No support queries yet.</Alert>
             )}
-            {studentRecord && studentScopedRequests.length > 0 && (
+            {studentRecord && studentSupportRequests.length > 0 && (
               <Stack spacing={2}>
-                {studentScopedRequests.map((request) => (
+                {studentSupportRequests.map((request) => (
                   <Paper
                     key={request.id}
                     sx={{
@@ -1227,6 +1353,90 @@ const Dashboard = () => {
               <Alert severity="error" sx={{ mt: 2 }}>
                 {counsellingError}
               </Alert>
+            )}
+          </Paper>
+
+          <Paper sx={{ ...sectionPaperSx }}>
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={2}
+              alignItems={{ md: "center" }}
+              justifyContent="space-between"
+              mb={2}
+            >
+              <Box>
+                <Typography variant="overline" sx={{ letterSpacing: 3, color: "text.secondary" }}>
+                  Counselling Schedule
+                </Typography>
+                <Typography variant="h6" mb={0.5}>My Counselling Sessions</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Scheduled sessions shared by your faculty.
+                </Typography>
+              </Box>
+              <Chip size="small" label={`Total: ${studentScheduledSessions.length}`} variant="outlined" />
+            </Stack>
+            {!studentRecord && (
+              <Alert severity="info">Look up your registration number to view counselling sessions.</Alert>
+            )}
+            {studentRecord && counsellingLoading && (
+              <Box display="flex" justifyContent="center" mt={2}>
+                <CircularProgress size={24} />
+              </Box>
+            )}
+            {studentRecord && !counsellingLoading && studentScheduledSessions.length === 0 && (
+              <Alert severity="info">No counselling sessions scheduled yet.</Alert>
+            )}
+            {studentRecord && studentScheduledSessions.length > 0 && (
+              <Stack spacing={2}>
+                {studentScheduledSessions.map((request) => (
+                  <Paper
+                    key={request.id}
+                    sx={{
+                      p: 2,
+                      bgcolor: alpha(surface, isDark ? 0.6 : 0.92),
+                      border: `1px solid ${borderSoft}`,
+                      boxShadow: `0 10px 20px ${alpha(theme.palette.common.black, isDark ? 0.25 : 0.06)}`,
+                      borderRadius: 3,
+                    }}
+                  >
+                    <Stack
+                      direction={{ xs: "column", md: "row" }}
+                      spacing={2}
+                      alignItems={{ md: "center" }}
+                      justifyContent="space-between"
+                    >
+                      <Box>
+                        <Typography fontWeight={600}>
+                          {request.counselling_mode === "OFFLINE" ? "Offline Counselling" : "Online Counselling"}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {formatRequestDate(request.scheduled_at || request.request_date)}
+                          {request.classroom ? ` • Classroom ${request.classroom}` : ""}
+                        </Typography>
+                      </Box>
+                      {request.counselling_mode === "ONLINE" && request.meet_link ? (
+                        <Button
+                          variant="contained"
+                          color="primary"
+                          component="a"
+                          href={request.meet_link}
+                          target="_blank"
+                          rel="noreferrer"
+                          sx={{ textTransform: "none", borderRadius: 999 }}
+                        >
+                          Join Meet
+                        </Button>
+                      ) : (
+                        <Chip
+                          label={request.classroom ? "Room Assigned" : "Room TBA"}
+                          color="warning"
+                          variant="outlined"
+                        />
+                      )}
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
             )}
           </Paper>
         </>
@@ -1549,7 +1759,7 @@ const Dashboard = () => {
                 </Typography>
               </Box>
               <Chip
-                label={`Open: ${facultyScopedRequests.filter((r) => String(r.status || "").toUpperCase() === "PENDING").length}`}
+                label={`Open: ${facultySupportRequests.filter((r) => String(r.status || "").toUpperCase() === "PENDING").length}`}
                 color="warning"
                 size="small"
                 sx={{ ml: { md: "auto" } }}
@@ -1561,10 +1771,10 @@ const Dashboard = () => {
                 <CircularProgress size={24} />
               </Box>
             )}
-            {!counsellingLoading && facultyScopedRequests.length === 0 && (
+            {!counsellingLoading && facultySupportRequests.length === 0 && (
               <Alert severity="info">No support queries yet.</Alert>
             )}
-            {facultyScopedRequests.length > 0 && (
+            {facultySupportRequests.length > 0 && (
               <TableContainer component={Paper} variant="outlined">
                 <Table>
                   <TableHead>
@@ -1575,7 +1785,7 @@ const Dashboard = () => {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {facultyScopedRequests.map((request) => (
+                    {facultySupportRequests.map((request) => (
                       <TableRow key={request.id}>
                         <TableCell>{request.name}</TableCell>
                         <TableCell>{request.register_number}</TableCell>
@@ -1589,30 +1799,41 @@ const Dashboard = () => {
                           />
                         </TableCell>
                         <TableCell>
-                          {request.status?.toUpperCase() === "PENDING" ? (
-                            <Stack direction="row" spacing={1}>
-                              <Button
-                                size="small"
-                                variant="contained"
-                                color="success"
-                                onClick={() => handleUpdateCounsellingStatus(request.id, "COMPLETED")}
-                              >
-                                Resolve
+                          {(() => {
+                            const status = String(request.status || "").toUpperCase();
+                            if (!status || status === "PENDING") {
+                              return (
+                                <Button
+                                  size="small"
+                                  variant="contained"
+                                  color="success"
+                                  onClick={() => handleUpdateCounsellingStatus(request.id, "COMPLETED")}
+                                  sx={{ textTransform: "none", fontWeight: 600 }}
+                                >
+                                  Mark Completed
+                                </Button>
+                              );
+                            }
+                            if (status === "COMPLETED") {
+                              return (
+                                <Button size="small" variant="outlined" disabled>
+                                  Completed
+                                </Button>
+                              );
+                            }
+                            if (status === "CANCELLED") {
+                              return (
+                                <Button size="small" variant="outlined" disabled>
+                                  Cancelled
+                                </Button>
+                              );
+                            }
+                            return (
+                              <Button size="small" variant="outlined" disabled>
+                                No Action
                               </Button>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                color="error"
-                                onClick={() => handleUpdateCounsellingStatus(request.id, "CANCELLED")}
-                              >
-                                Cancel
-                              </Button>
-                            </Stack>
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              No actions
-                            </Typography>
-                          )}
+                            );
+                          })()}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1629,10 +1850,35 @@ const Dashboard = () => {
 
           {/* ================= STUDENT MANAGEMENT SECTION ================= */}
           <Paper sx={{ ...sectionPaperSx, overflowX: "auto" }}>
-            <Typography variant="h6" mb={2}>📋 Student Management</Typography>
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={2}
+              alignItems={{ md: "center" }}
+              mb={2}
+            >
+              <Box>
+                <Typography variant="h6">📋 Student Management</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Search and manage student records.
+                </Typography>
+              </Box>
+              <TextField
+                placeholder="Search by name, register no, phone, year, semester..."
+                value={studentSearchTerm}
+                onChange={(event) => setStudentSearchTerm(event.target.value)}
+                sx={{ ...inputSx, minWidth: { xs: "100%", md: 320 }, ml: { md: "auto" } }}
+              />
+              <Chip
+                size="small"
+                label={`Showing: ${studentManagementStudents.length}`}
+                variant="outlined"
+              />
+            </Stack>
             <StudentList
-              students={students}
+              students={studentManagementStudents}
               reload={fetchStudents}
+              counsellingRequests={facultyScopedRequests}
+              onCounsellingUpdate={fetchCounsellingRequests}
             />
           </Paper>
 
