@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Box, Button, CssBaseline } from "@mui/material";
 import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
@@ -6,19 +6,20 @@ import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 import { ThemeProvider } from "@mui/material/styles";
 import getTheme from "./styles/theme";
 
-// Components & Pages
+// Components & Pages (lazy-loaded to shrink initial bundle)
 import Navbar from "./components/Navbar";
-import Dashboard from "./pages/Dashboard";
-import AddStudentPage from "./pages/AddStudentPage";
-import EditStudent from "./components/EditStudent";
-import StudentManagement from "./pages/StudentManagement";
-import StudentAnalytics from "./pages/StudentAnalytics";
-import LoginPage from "./pages/LoginPage";
-import FacultyExports from "./pages/FacultyExports";
-import FacultyAlerts from "./pages/FacultyAlerts";
-import StudentAlerts from "./pages/StudentAlerts";
-import MyReport from "./pages/MyReport";
 import { RoleProvider, useRole } from "./context/RoleContext";
+
+const Dashboard = React.lazy(() => import("./pages/Dashboard"));
+const AddStudentPage = React.lazy(() => import("./pages/AddStudentPage"));
+const EditStudent = React.lazy(() => import("./components/EditStudent"));
+const StudentManagement = React.lazy(() => import("./pages/StudentManagement"));
+const StudentAnalytics = React.lazy(() => import("./pages/StudentAnalytics"));
+const LoginPage = React.lazy(() => import("./pages/LoginPage"));
+const FacultyExports = React.lazy(() => import("./pages/FacultyExports"));
+const FacultyAlerts = React.lazy(() => import("./pages/FacultyAlerts"));
+const StudentAlerts = React.lazy(() => import("./pages/StudentAlerts"));
+const MyReport = React.lazy(() => import("./pages/MyReport"));
 
 const RoleRoute = ({ allowedRoles, element }) => {
   const { role } = useRole();
@@ -51,7 +52,7 @@ const AppLayout = ({ themeMode, onToggleTheme }) => {
   const hideNavbar = location.pathname === "/login";
 
   return (
-    <>
+    <Suspense fallback={<Box sx={{ p: 4 }}>Loading...</Box>}>
       {!hideNavbar && <Navbar themeMode={themeMode} onToggleTheme={onToggleTheme} />}
       {hideNavbar && (
         <Box sx={{ position: "fixed", top: 16, right: 16, zIndex: 1300 }}>
@@ -104,10 +105,10 @@ const AppLayout = ({ themeMode, onToggleTheme }) => {
         />
 
         {/* Student List Page */}
-            <Route
-              path="/studentlist"
-              element={<RoleRoute allowedRoles={["faculty", "admin"]} element={<StudentManagement />} />}
-            />
+        <Route
+          path="/studentlist"
+          element={<RoleRoute allowedRoles={["faculty", "admin"]} element={<StudentManagement />} />}
+        />
 
         {/* Student Analytics */}
         <Route
@@ -126,7 +127,7 @@ const AppLayout = ({ themeMode, onToggleTheme }) => {
         {/* Catch all unmatched routes */}
         <Route path="*" element={<Navigate to="/dashboard" />} />
       </Routes>
-    </>
+    </Suspense>
   );
 };
 
