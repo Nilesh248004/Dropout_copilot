@@ -17,6 +17,24 @@ Thumbs.db
 dist/
 build/
 
+# TWA / Android artifacts
+app-release-*.apk
+app-release-*.aab
+app-release-*.apk.idsig
+
+# Bubblewrap/Android project (not part of web repo)
+/.gradle/
+/gradle/
+/app/
+/build.gradle
+/settings.gradle
+/gradle.properties
+/gradlew
+/gradlew.bat
+/manifest-checksum.txt
+/store_icon.png
+/twa-manifest.json
+
 # IDE files
 .vscode/
 .idea/
