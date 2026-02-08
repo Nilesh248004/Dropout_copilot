@@ -551,10 +551,10 @@ const Dashboard = () => {
         );
       })
     : counsellingRequests;
-  const facultySupportRequests = facultyScopedRequests.filter((request) => {
-    const meetLink = String(request.meet_link || "").trim();
-    return meetLink.length === 0;
-  });
+  // Only show unresolved queries (PENDING) in the support table, hide scheduled/completed counselling
+  const facultySupportRequests = facultyScopedRequests.filter(
+    (request) => String(request.status || "").toUpperCase() === "PENDING"
+  );
   const pendingRequestsCount = facultyScopedRequests.filter(
     (request) => String(request.status || "").toUpperCase() === "PENDING"
   ).length;
