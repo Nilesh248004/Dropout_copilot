@@ -1,7 +1,7 @@
 {
   "short_name": "Copilot",
   "name": "Dropout Copilot",
-  "start_url": ".",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
