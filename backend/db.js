@@ -24,9 +24,17 @@ if (useSsl) {
 
 const pool = new Pool(poolConfig);
 
+// Ensure every session uses UTC to avoid timezone drift on timestamp fields
+pool.on("connect", async (client) => {
+  try {
+    await client.query("SET TIME ZONE 'UTC'");
+  } catch (err) {
+    console.warn("⚠️ Could not set UTC timezone for session:", err.message);
+  }
+});
 
 pool.connect()
-  .then(() => console.log("✅ PostgreSQL Connected"))
+  .then(() => console.log("✅ PostgreSQL Connected (TZ=UTC)"))
   .catch(err => console.error("❌ DB Connection Error:", err));
 
 module.exports = pool;

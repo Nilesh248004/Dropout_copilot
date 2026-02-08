@@ -22,6 +22,7 @@ import { API_BASE_URL } from "../config/api";
 import { useRole } from "../context/RoleContext";
 import { normalizeFacultyId } from "../utils/faculty";
 import { getRiskScore } from "../utils/risk";
+import { toIsoFromLocalDateTime } from "../utils/date";
 
 const StudentAnalytics = () => {
   const { id } = useParams();
@@ -129,7 +130,8 @@ const StudentAnalytics = () => {
       setScheduleStatus({ type: "error", message: "Faculty ID is required." });
       return;
     }
-    if (!scheduleDate) {
+    const scheduledAt = toIsoFromLocalDateTime(scheduleDate);
+    if (!scheduledAt) {
       setScheduleStatus({
         type: "error",
         message: "Date/time is required.",
@@ -158,7 +160,8 @@ const StudentAnalytics = () => {
       await axios.post(`${API_BASE_URL}/counselling/assign`, {
         student_id: student.id,
         faculty_id: mappedFacultyId,
-        scheduled_at: scheduleDate,
+        scheduled_at: scheduledAt,
+        scheduled_at_local: scheduleDate,
         meet_link: scheduleMode === "ONLINE" ? scheduleLink.trim() : "",
         classroom: scheduleMode === "OFFLINE" ? resolvedClassroom : "",
         counselling_mode: scheduleMode,

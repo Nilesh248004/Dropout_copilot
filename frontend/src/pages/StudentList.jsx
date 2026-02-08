@@ -29,6 +29,7 @@ import { API_BASE_URL } from "../config/api";
 import { useRole } from "../context/RoleContext";
 import { filterStudentsByFaculty } from "../utils/faculty";
 import { getRiskLevel, getRiskScore } from "../utils/risk";
+import { toIsoFromLocalDateTime } from "../utils/date";
 
 const StudentList = ({ students: propStudents, reload, counsellingRequests, onCounsellingUpdate }) => {
   const { role, facultyId } = useRole();
@@ -192,7 +193,8 @@ const StudentList = ({ students: propStudents, reload, counsellingRequests, onCo
       });
       return;
     }
-    if (!assignDate) {
+    const scheduledAt = toIsoFromLocalDateTime(assignDate);
+    if (!scheduledAt) {
       setAssignStatus({
         type: "error",
         message: "Date/time is required.",
@@ -222,7 +224,8 @@ const StudentList = ({ students: propStudents, reload, counsellingRequests, onCo
       await axios.post(`${API_BASE_URL}/counselling/assign`, {
         student_id: assignTarget.id,
         faculty_id: facultyId,
-        scheduled_at: assignDate,
+        scheduled_at: scheduledAt,
+        scheduled_at_local: assignDate,
         meet_link: assignMode === "ONLINE" ? assignLink.trim() : "",
         classroom: assignMode === "OFFLINE" ? resolvedClassroom : "",
         counselling_mode: assignMode,

@@ -20,6 +20,7 @@ import axios from "axios";
 import { API_BASE_URL } from "../config/api";
 import { useRole } from "../context/RoleContext";
 import StudentReportCharts from "../components/StudentReportCharts";
+import { normalizeFacultyId } from "../utils/faculty";
 
 const MyReport = () => {
   const { studentId } = useRole();
@@ -29,9 +30,12 @@ const MyReport = () => {
   const [counselling, setCounselling] = useState(null);
   const [counsellingLoading, setCounsellingLoading] = useState(false);
   const [counsellingStatus, setCounsellingStatus] = useState(null);
-  const [scheduledSessions, setScheduledSessions] = useState([]);
-  const [scheduledLoading, setScheduledLoading] = useState(false);
-  const [scheduledStatus, setScheduledStatus] = useState(null);
+  const [counsellingRequests, setCounsellingRequests] = useState([]);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+  const [requestsStatus, setRequestsStatus] = useState(null);
+  const [queryReason, setQueryReason] = useState("");
+  const [queryStatus, setQueryStatus] = useState(null);
+  const [queryFacultyId, setQueryFacultyId] = useState("");
   const [chatMessages, setChatMessages] = useState([
     {
       id: "welcome",
@@ -119,29 +123,32 @@ const MyReport = () => {
     [studentRecord?.id]
   );
 
-  const fetchScheduledSessions = useCallback(async () => {
+  const fetchCounsellingRequests = useCallback(async () => {
     if (!studentRecord?.id) {
-      setScheduledSessions([]);
-      setScheduledStatus(null);
+      setCounsellingRequests([]);
+      setRequestsStatus(null);
       return;
     }
     try {
-      setScheduledLoading(true);
-      setScheduledStatus(null);
-      const res = await axios.get(`${API_BASE_URL}/counselling`, {
-        params: { student_id: studentRecord.id, status: "SCHEDULED" },
-      });
-      setScheduledSessions(Array.isArray(res.data) ? res.data : []);
+      setRequestsLoading(true);
+      setRequestsStatus(null);
+      const params = { student_id: studentRecord.id };
+      const normalizedFaculty = normalizeFacultyId(studentRecord?.faculty_id);
+      if (normalizedFaculty) {
+        params.faculty_id = normalizedFaculty;
+      }
+      const res = await axios.get(`${API_BASE_URL}/counselling`, { params });
+      setCounsellingRequests(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
-      setScheduledSessions([]);
-      setScheduledStatus({
+      setCounsellingRequests([]);
+      setRequestsStatus({
         type: "error",
-        message: err.response?.data?.error || "Unable to load counselling sessions.",
+        message: err.response?.data?.error || "Unable to load counselling requests.",
       });
     } finally {
-      setScheduledLoading(false);
+      setRequestsLoading(false);
     }
-  }, [studentRecord?.id]);
+  }, [studentRecord?.id, studentRecord?.faculty_id]);
 
   useEffect(() => {
     if (!studentRecord?.id) return;
@@ -150,8 +157,13 @@ const MyReport = () => {
 
   useEffect(() => {
     if (!studentRecord?.id) return;
-    fetchScheduledSessions();
-  }, [studentRecord?.id, fetchScheduledSessions]);
+    fetchCounsellingRequests();
+  }, [studentRecord?.id, fetchCounsellingRequests]);
+
+  useEffect(() => {
+    if (!studentRecord?.faculty_id) return;
+    setQueryFacultyId(studentRecord.faculty_id);
+  }, [studentRecord?.faculty_id]);
 
   const getUrgencyColor = (value) => {
     switch (String(value || "").toUpperCase()) {
@@ -167,30 +179,86 @@ const MyReport = () => {
     }
   };
 
+  const counsellingStatusColor = (status) => {
+    switch (String(status || "").toUpperCase()) {
+      case "SCHEDULED":
+        return "info";
+      case "COMPLETED":
+        return "success";
+      case "CANCELLED":
+        return "error";
+      default:
+        return "warning";
+    }
+  };
+
   const formatSessionDate = useCallback((value) => {
     if (!value) return "—";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return String(value);
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     return date.toLocaleString([], {
       year: "numeric",
       month: "short",
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      timeZone,
+      timeZoneName: "short",
     });
   }, []);
 
+  const riskBadgeColor = (level) => {
+    switch (String(level || "").toUpperCase()) {
+      case "HIGH":
+        return "error";
+      case "MEDIUM":
+        return "warning";
+      case "LOW":
+        return "success";
+      default:
+        return "default";
+    }
+  };
+
+  const studentSupportRequests = useMemo(() => {
+    if (!Array.isArray(counsellingRequests)) return [];
+    return counsellingRequests.filter((request) => {
+      const meetLink = String(request?.meet_link || "").trim();
+      return meetLink.length === 0;
+    });
+  }, [counsellingRequests]);
+
+  const studentScheduledSessions = useMemo(() => {
+    if (!Array.isArray(counsellingRequests)) return [];
+    return counsellingRequests.filter(
+      (request) => String(request?.status || "").toUpperCase() === "SCHEDULED"
+    );
+  }, [counsellingRequests]);
+
   const nextSession = useMemo(() => {
-    if (!Array.isArray(scheduledSessions) || scheduledSessions.length === 0) return null;
-    const withDates = scheduledSessions.filter((session) => session?.scheduled_at);
+    if (!studentScheduledSessions.length) return null;
+    const withDates = studentScheduledSessions.filter((session) => session?.scheduled_at);
     const sorted = [...withDates].sort(
       (a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
     );
-    if (sorted.length === 0) return scheduledSessions[0];
+    if (sorted.length === 0) return studentScheduledSessions[0];
     const now = Date.now();
     const upcoming = sorted.find((session) => new Date(session.scheduled_at).getTime() >= now);
     return upcoming || sorted[0];
-  }, [scheduledSessions]);
+  }, [studentScheduledSessions]);
+
+  const resolvedRisk = useMemo(() => {
+    const explicit =
+      studentRecord?.risk_level ||
+      counselling?.risk_level;
+    if (explicit) return String(explicit).toUpperCase();
+
+    const inferredReason = (nextSession?.reason || "").toLowerCase();
+    if (inferredReason.includes("high")) return "HIGH";
+    if (inferredReason.includes("medium")) return "MEDIUM";
+    return null;
+  }, [studentRecord?.risk_level, counselling?.risk_level, nextSession?.reason]);
 
   const scrollChatToBottom = useCallback((behavior = "auto") => {
     const container = chatScrollRef.current;
@@ -367,6 +435,53 @@ const MyReport = () => {
     return wsConnectPromiseRef.current;
   }, [wsUrl]);
 
+  const handleSubmitQuery = useCallback(async () => {
+    if (!studentRecord?.id) return;
+    const mappedFacultyId = String(studentRecord?.faculty_id || queryFacultyId || "").trim();
+    if (!mappedFacultyId) {
+      setQueryStatus({
+        type: "error",
+        message: "Please enter the faculty ID before submitting your query.",
+      });
+      return;
+    }
+    try {
+      setQueryStatus(null);
+      const res = await axios.post(`${API_BASE_URL}/counselling/book`, {
+        student_id: studentRecord.id,
+        reason: queryReason || "Requesting support",
+        faculty_id: mappedFacultyId,
+      });
+      setQueryReason("");
+      if (!studentRecord?.faculty_id) {
+        setQueryFacultyId("");
+      }
+      const facultyLabel = res.data?.faculty_label;
+      setQueryStatus({
+        type: "success",
+        message: facultyLabel
+          ? `Your query has been sent to ${facultyLabel}.`
+          : "Your query has been sent. A faculty member will follow up soon.",
+      });
+      fetchCounsellingRequests();
+    } catch (err) {
+      console.error("Query submission error:", err.message);
+      setQueryStatus({
+        type: "error",
+        message:
+          err.response?.data?.error ||
+          err.response?.data?.message ||
+          "Unable to submit your query right now. Please try again shortly.",
+      });
+    }
+  }, [
+    studentRecord?.id,
+    studentRecord?.faculty_id,
+    queryFacultyId,
+    queryReason,
+    fetchCounsellingRequests,
+  ]);
+
   const handleSendChat = useCallback(async () => {
     const message = chatInput.trim();
     if (!message || chatLoading || !studentRecord?.id) return;
@@ -541,11 +656,11 @@ const MyReport = () => {
 
       {!loading && studentRecord && <StudentReportCharts student={studentRecord} />}
 
-      {studentRecord && (
-        <Paper
-          sx={{
-            p: { xs: 2.5, md: 3 },
-            mt: 3,
+        {studentRecord && (
+          <Paper
+            sx={{
+              p: { xs: 2.5, md: 3 },
+              mt: 3,
             borderRadius: 4,
             position: "relative",
             overflow: "hidden",
@@ -571,16 +686,17 @@ const MyReport = () => {
             alignItems={{ md: "center" }}
             justifyContent="space-between"
           >
-            <Stack direction="row" spacing={2} alignItems="center">
+            <Stack direction="row" spacing={2} alignItems="center" sx={{ flex: 1 }}>
               <Box
                 sx={{
-                  width: 52,
-                  height: 52,
+                  width: 54,
+                  height: 54,
                   borderRadius: "16px",
                   display: "grid",
                   placeItems: "center",
-                  bgcolor: "rgba(37, 99, 235, 0.15)",
+                  bgcolor: "rgba(37, 99, 235, 0.18)",
                   color: "primary.main",
+                  boxShadow: "0 10px 30px rgba(37,99,235,0.25)",
                 }}
               >
                 <EventAvailableRoundedIcon />
@@ -599,54 +715,60 @@ const MyReport = () => {
                 </Typography>
               </Box>
             </Stack>
-            {nextSession ? (
-              nextSession.counselling_mode === "OFFLINE" || nextSession.classroom ? (
+            <Stack direction="row" spacing={1}>
+              {nextSession && (
                 <Chip
-                  label="Offline Session"
-                  color="warning"
+                  label={`${nextSession.counselling_mode === "OFFLINE" ? "Offline" : "Online"} Session`}
+                  color={nextSession.counselling_mode === "OFFLINE" ? "warning" : "info"}
                   variant="outlined"
                 />
-              ) : nextSession.meet_link ? (
-                <Button
-                  variant="contained"
-                  color="primary"
-                  component="a"
-                  href={nextSession.meet_link}
-                  target="_blank"
-                  rel="noreferrer"
-                  startIcon={<VideoCallRoundedIcon />}
-                  sx={{
-                    textTransform: "none",
-                    px: 3,
-                    borderRadius: 999,
-                    boxShadow: "0 12px 24px rgba(37, 99, 235, 0.25)",
-                  }}
-                >
-                  Join Google Meet
-                </Button>
+              )}
+              {resolvedRisk && (
+                <Chip
+                  label={`Risk: ${resolvedRisk}`}
+                  color={riskBadgeColor(resolvedRisk)}
+                  variant="filled"
+                />
+              )}
+              {nextSession ? (
+                resolvedRisk === "HIGH" ? (
+                  <Chip label="Offline only" variant="outlined" />
+                ) : nextSession.meet_link ? (
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    component="a"
+                    href={nextSession.meet_link}
+                    target="_blank"
+                    rel="noreferrer"
+                    startIcon={<VideoCallRoundedIcon />}
+                    sx={{
+                      textTransform: "none",
+                      px: 3,
+                      borderRadius: 999,
+                      boxShadow: "0 12px 24px rgba(37, 99, 235, 0.25)",
+                    }}
+                  >
+                    Join Meet
+                  </Button>
+                ) : (
+                  <Chip label="Meet link pending" variant="outlined" />
+                )
               ) : (
-                <Chip label="Meet link pending" variant="outlined" />
-              )
-            ) : (
-              <Chip label="Not scheduled" variant="outlined" />
-            )}
+                <Chip label="Not scheduled" variant="outlined" />
+              )}
+            </Stack>
           </Stack>
 
           <Divider sx={{ my: 2.5 }} />
 
-          {scheduledStatus && (
-            <Alert severity={scheduledStatus.type} sx={{ mb: 2 }}>
-              {scheduledStatus.message}
-            </Alert>
-          )}
-
-          {scheduledLoading && (
+          {requestsLoading && (
             <Box display="flex" justifyContent="center" mt={1}>
               <CircularProgress size={22} />
             </Box>
           )}
 
-          {!scheduledLoading && nextSession && (
+          {!requestsLoading && nextSession && (
             <Stack spacing={1.2}>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={3}>
                 <Box>
@@ -654,7 +776,10 @@ const MyReport = () => {
                     Scheduled For
                   </Typography>
                   <Typography sx={{ fontWeight: 700 }}>
-                    {formatSessionDate(nextSession.scheduled_at)}
+                    {formatSessionDate(nextSession.scheduled_local || nextSession.scheduled_at)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Local time • {Intl.DateTimeFormat().resolvedOptions().timeZone}
                   </Typography>
                 </Box>
                 <Box>
@@ -684,17 +809,158 @@ const MyReport = () => {
             </Stack>
           )}
 
-          {!scheduledLoading && !nextSession && (
+          {!requestsLoading && !nextSession && (
             <Alert severity="info">
               No counselling session scheduled yet. Once your faculty assigns one, it will appear
               here with the Meet link.
             </Alert>
           )}
-        </Paper>
-      )}
+          </Paper>
+        )}
 
-      {studentRecord && (
-        <Paper sx={{ p: { xs: 2.5, md: 3 }, mt: 3, borderRadius: 4 }}>
+        {studentRecord && (
+          <Paper sx={{ p: { xs: 2.5, md: 3 }, mt: 3, borderRadius: 4 }}>
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={2}
+              alignItems={{ md: "center" }}
+              justifyContent="space-between"
+              mb={2}
+            >
+              <Box>
+                <Typography variant="overline" sx={{ letterSpacing: 3, color: "text.secondary" }}>
+                  Student Support
+                </Typography>
+                <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                  Support Request
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Send a query to your faculty advisor for academic or counselling support.
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap">
+                <Chip
+                  size="small"
+                  label={`Faculty: ${studentRecord?.faculty_id || queryFacultyId || "Unassigned"}`}
+                  variant="outlined"
+                />
+              </Stack>
+            </Stack>
+            <Stack spacing={2}>
+              <TextField
+                label="Faculty ID"
+                value={queryFacultyId}
+                onChange={(event) => setQueryFacultyId(event.target.value)}
+                fullWidth
+                disabled={Boolean(studentRecord?.faculty_id)}
+                helperText={
+                  studentRecord?.faculty_id
+                    ? "Mapped to your faculty advisor"
+                    : "Enter the faculty ID for your request"
+                }
+              />
+              <TextField
+                label="Describe your concern"
+                multiline
+                minRows={3}
+                value={queryReason}
+                onChange={(event) => setQueryReason(event.target.value)}
+                fullWidth
+              />
+              <Box>
+                <Button
+                  variant="contained"
+                  sx={{ textTransform: "none", fontWeight: 700, px: 3, borderRadius: 999 }}
+                  disabled={
+                    !studentRecord ||
+                    !String(studentRecord?.faculty_id || queryFacultyId || "").trim()
+                  }
+                  onClick={handleSubmitQuery}
+                >
+                  Submit Query
+                </Button>
+              </Box>
+            </Stack>
+            {queryStatus?.type === "success" && (
+              <Alert severity="success" sx={{ mt: 2 }}>
+                {queryStatus.message}
+              </Alert>
+            )}
+            {queryStatus?.type === "error" && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                {queryStatus.message}
+              </Alert>
+            )}
+
+            <Divider sx={{ my: 3 }} />
+
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={2}
+              alignItems={{ md: "center" }}
+              justifyContent="space-between"
+              mb={2}
+            >
+              <Box>
+                <Typography variant="overline" sx={{ letterSpacing: 3, color: "text.secondary" }}>
+                  Support History
+                </Typography>
+                <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                  My Support Queries
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Track the status of your requests and responses.
+                </Typography>
+              </Box>
+              <Chip size="small" label={`Total: ${studentSupportRequests.length}`} variant="outlined" />
+            </Stack>
+            {requestsLoading && (
+              <Box display="flex" justifyContent="center" mt={2}>
+                <CircularProgress size={24} />
+              </Box>
+            )}
+            {!requestsLoading && studentSupportRequests.length === 0 && (
+              <Alert severity="info">No support queries yet.</Alert>
+            )}
+            {!requestsLoading && studentSupportRequests.length > 0 && (
+              <Stack spacing={2}>
+                {studentSupportRequests.map((request) => (
+                  <Paper key={request.id} variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
+                    <Stack
+                      direction={{ xs: "column", md: "row" }}
+                      spacing={2}
+                      alignItems={{ md: "center" }}
+                      justifyContent="space-between"
+                    >
+                      <Box>
+                        <Typography fontWeight={600}>
+                          {request.reason || "Support request"}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Sent to {request.faculty_label || request.faculty_id || "Faculty"}{" "}
+                          - {formatSessionDate(request.request_date)}
+                        </Typography>
+                      </Box>
+                      <Chip
+                        label={request.status || "PENDING"}
+                        color={counsellingStatusColor(request.status)}
+                        sx={{ alignSelf: { xs: "flex-start", md: "center" } }}
+                      />
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            )}
+            {requestsStatus && (
+              <Alert severity={requestsStatus.type} sx={{ mt: 2 }}>
+                {requestsStatus.message}
+              </Alert>
+            )}
+          </Paper>
+        )}
+
+        {studentRecord && (
+          <Paper sx={{ p: { xs: 2.5, md: 3 }, mt: 3, borderRadius: 4 }}>
       <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }}>
         <Box sx={{ flex: 1 }}>
               <Typography variant="overline" sx={{ letterSpacing: 3, color: "text.secondary" }}>

@@ -594,6 +594,7 @@ router.post("/assign", async (req, res) => {
       classroom,
       reason,
       counselling_mode,
+      scheduled_at_local,
     } = req.body;
 
     const id = Number(student_id);
@@ -673,15 +674,16 @@ router.post("/assign", async (req, res) => {
         `
         UPDATE counselling_requests
         SET status = 'SCHEDULED',
-            scheduled_at = $1,
+            scheduled_at = $1::timestamptz,
             meet_link = $2,
             classroom = $3,
             counselling_mode = $4,
             reason = $5,
             faculty_label = $6,
-            faculty_id = $7
-        WHERE id = $8
-        RETURNING id, student_id, status, scheduled_at, meet_link, classroom, counselling_mode, request_date, faculty_label
+            faculty_id = $7,
+            scheduled_local = $8
+        WHERE id = $9
+        RETURNING id, student_id, status, scheduled_at, scheduled_local, meet_link, classroom, counselling_mode, request_date, faculty_label
         `,
         [
           scheduledAt.toISOString(),
@@ -691,6 +693,7 @@ router.post("/assign", async (req, res) => {
           safeReason,
           facultyLabel,
           normalizedFacultyId,
+          scheduled_at_local || scheduled_at || null,
           requestId,
         ]
       );
@@ -705,12 +708,13 @@ router.post("/assign", async (req, res) => {
           faculty_label,
           faculty_id,
           scheduled_at,
+          scheduled_local,
           meet_link,
           classroom,
           counselling_mode
         )
-        VALUES ($1, $2, 'SCHEDULED', NOW(), $3, $4, $5, $6, $7, $8)
-        RETURNING id, student_id, status, scheduled_at, meet_link, classroom, counselling_mode, request_date, faculty_label
+        VALUES ($1, $2, 'SCHEDULED', NOW(), $3, $4, $5::timestamptz, $6, $7, $8, $9)
+        RETURNING id, student_id, status, scheduled_at, scheduled_local, meet_link, classroom, counselling_mode, request_date, faculty_label
         `,
         [
           id,
@@ -718,6 +722,7 @@ router.post("/assign", async (req, res) => {
           facultyLabel,
           normalizedFacultyId,
           scheduledAt.toISOString(),
+          scheduled_at_local || scheduled_at || null,
           counsellingMode === "ONLINE" ? trimmedLink : null,
           counsellingMode === "OFFLINE" ? trimmedClassroom : null,
           counsellingMode,
@@ -786,6 +791,7 @@ router.post("/assign", async (req, res) => {
     res.json({
       message: "Counselling session scheduled",
       ...scheduled,
+      scheduled_local: scheduled.scheduled_local || scheduled_at_local || scheduled.scheduled_at,
     });
   } catch (err) {
     console.error("❌ Assign Counselling Error:", err.message);

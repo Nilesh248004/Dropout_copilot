@@ -56,9 +56,6 @@ const Dashboard = () => {
   const [studentLookupLoading, setStudentLookupLoading] = useState(false);
   const [studentRegNo, setStudentRegNo] = useState("");
   const [studentRecord, setStudentRecord] = useState(null);
-  const [queryReason, setQueryReason] = useState("");
-  const [queryStatus, setQueryStatus] = useState(null);
-  const [queryFacultyId, setQueryFacultyId] = useState("");
   const [facultyFilter, setFacultyFilter] = useState("All Faculties");
   const [adminSearchQuery, setAdminSearchQuery] = useState("");
   const [adminSearchTerm, setAdminSearchTerm] = useState("");
@@ -188,20 +185,10 @@ const Dashboard = () => {
   }, [role, studentId, fetchStudentRecord]);
 
   useEffect(() => {
-    if (role === "faculty") {
-      fetchCounsellingRequests();
-      return;
-    }
-    if (role === "student") {
-      fetchCounsellingRequests(studentRecord?.id, studentRecord?.faculty_id);
-    }
-  }, [role, facultyId, studentRecord?.id, studentRecord?.faculty_id, fetchCounsellingRequests]);
+    if (role !== "faculty") return;
+    fetchCounsellingRequests();
+  }, [role, facultyId, fetchCounsellingRequests]);
 
-  useEffect(() => {
-    if (role === "student" && studentRecord?.faculty_id) {
-      setQueryFacultyId(studentRecord.faculty_id);
-    }
-  }, [role, studentRecord?.faculty_id]);
 
   // ================= DASHBOARD STATS ==================
   const totalStudents = students.length;
@@ -330,46 +317,6 @@ const Dashboard = () => {
     setStudentRecord(match || null);
   };
 
-  const handleSubmitQuery = async () => {
-    if (!studentRecord) return;
-    const mappedFacultyId = String(studentRecord?.faculty_id || queryFacultyId || "").trim();
-    if (!mappedFacultyId) {
-      setQueryStatus({
-        type: "error",
-        message: "Please enter the faculty ID before submitting your query.",
-      });
-      return;
-    }
-    try {
-      setQueryStatus(null);
-    const res = await axios.post(`${API_BASE_URL}/counselling/book`, {
-      student_id: studentRecord.id,
-      reason: queryReason || "Requesting support",
-      faculty_id: mappedFacultyId,
-    });
-    setQueryReason("");
-    if (!studentRecord?.faculty_id) {
-      setQueryFacultyId("");
-    }
-      const facultyLabel = res.data?.faculty_label;
-      setQueryStatus({
-        type: "success",
-        message: facultyLabel
-          ? `Your query has been sent to ${facultyLabel}.`
-          : "Your query has been sent. A faculty member will follow up soon.",
-      });
-      fetchCounsellingRequests(studentRecord?.id, studentRecord?.faculty_id);
-    } catch (err) {
-      console.error("Query submission error:", err.message);
-      setQueryStatus({
-        type: "error",
-        message:
-          err.response?.data?.error ||
-          err.response?.data?.message ||
-          "Unable to submit your query right now. Please try again shortly.",
-      });
-    }
-  };
 
   const handleExportCsv = () => {
     const headers = [
@@ -592,14 +539,6 @@ const Dashboard = () => {
       })
     : students;
 
-  const studentScopedRequests = studentRecord
-    ? counsellingRequests.filter((request) => {
-        if (request.student_id !== studentRecord.id) return false;
-        const expectedFaculty = normalizeFacultyId(studentRecord.faculty_id);
-        if (!expectedFaculty) return true;
-        return normalizeFacultyId(request.faculty_id) === expectedFaculty;
-      })
-    : [];
   const facultyScopedRequests = isFaculty
     ? counsellingRequests.filter((request) => {
         const expectedFaculty = normalizeFacultyId(facultyId);
@@ -612,31 +551,10 @@ const Dashboard = () => {
         );
       })
     : counsellingRequests;
-  const studentSupportRequests = studentScopedRequests.filter((request) => {
-    const meetLink = String(request.meet_link || "").trim();
-    return meetLink.length === 0;
-  });
   const facultySupportRequests = facultyScopedRequests.filter((request) => {
     const meetLink = String(request.meet_link || "").trim();
     return meetLink.length === 0;
   });
-  const studentScheduledSessions = studentScopedRequests.filter(
-    (request) => String(request.status || "").toUpperCase() === "SCHEDULED"
-  );
-  const nextStudentSession = useMemo(() => {
-    if (!studentScheduledSessions.length) return null;
-    const sorted = [...studentScheduledSessions].sort((a, b) => {
-      const aDate = new Date(a.scheduled_at || a.request_date || 0).getTime();
-      const bDate = new Date(b.scheduled_at || b.request_date || 0).getTime();
-      return aDate - bDate;
-    });
-    const now = Date.now();
-    const upcoming = sorted.find(
-      (session) =>
-        new Date(session.scheduled_at || session.request_date || 0).getTime() >= now
-    );
-    return upcoming || sorted[0] || null;
-  }, [studentScheduledSessions]);
   const pendingRequestsCount = facultyScopedRequests.filter(
     (request) => String(request.status || "").toUpperCase() === "PENDING"
   ).length;
@@ -666,13 +584,6 @@ const Dashboard = () => {
   const hasStudentPrediction =
     Boolean(studentRiskLevel) && ["HIGH", "MEDIUM", "LOW"].includes(studentRiskLevel);
   const highRiskStudents = students.filter((s) => getRiskLevel(s) === "HIGH");
-  const nextSessionIsOffline =
-    String(nextStudentSession?.counselling_mode || "").toUpperCase() === "OFFLINE";
-  const nextSessionLocation = nextStudentSession
-    ? nextSessionIsOffline
-      ? `Classroom ${nextStudentSession.classroom || "TBA"}`
-      : "Online via Google Meet"
-    : "";
   const facultyDisplayName = useMemo(() => {
     if (!email) return "Faculty Member";
     const handle = email.split("@")[0];
@@ -1107,338 +1018,6 @@ const Dashboard = () => {
             )}
           </Paper>
 
-          {studentRecord && nextStudentSession && (
-            <Paper
-              sx={{
-                ...sectionPaperSx,
-                position: "relative",
-                overflow: "hidden",
-                border: `1px solid ${alpha(primaryMain, 0.25)}`,
-                background: `linear-gradient(140deg, ${alpha(primaryLight, 0.18)} 0%, ${alpha(surface, 0.92)} 70%)`,
-              }}
-            >
-              <Box
-                sx={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: 6,
-                  background: "linear-gradient(90deg, #0ea5e9, #22d3ee, #38bdf8)",
-                }}
-              />
-              <Stack
-                direction={{ xs: "column", md: "row" }}
-                spacing={2}
-                alignItems={{ md: "center" }}
-                justifyContent="space-between"
-              >
-                <Box>
-                  <Typography variant="overline" sx={{ letterSpacing: 3, color: "text.secondary" }}>
-                    Counselling Alert
-                  </Typography>
-                  <Typography variant="h6" mb={0.5}>Your counselling session is scheduled</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {formatRequestDate(nextStudentSession.scheduled_at || nextStudentSession.request_date)}
-                    {nextSessionLocation ? ` - ${nextSessionLocation}` : ""}
-                  </Typography>
-                  <Stack direction="row" spacing={1} mt={1} flexWrap="wrap">
-                    <Chip
-                      size="small"
-                      label={nextSessionIsOffline ? "Offline" : "Online"}
-                      color={nextSessionIsOffline ? "warning" : "primary"}
-                      variant="outlined"
-                    />
-                    <Chip
-                      size="small"
-                      label={`Status: ${nextStudentSession.status || "SCHEDULED"}`}
-                      variant="outlined"
-                    />
-                  </Stack>
-                </Box>
-                {nextSessionIsOffline ? (
-                  <Chip
-                    label={nextStudentSession.classroom ? `Room ${nextStudentSession.classroom}` : "Room TBA"}
-                    color="warning"
-                    variant="outlined"
-                  />
-                ) : nextStudentSession.meet_link ? (
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    component="a"
-                    href={nextStudentSession.meet_link}
-                    target="_blank"
-                    rel="noreferrer"
-                    sx={{ textTransform: "none", borderRadius: 999 }}
-                  >
-                    Join Meet
-                  </Button>
-                ) : (
-                  <Chip label="Meet link pending" color="info" variant="outlined" />
-                )}
-              </Stack>
-            </Paper>
-          )}
-
-          <Paper
-            sx={{
-              ...sectionPaperSx,
-              position: "relative",
-              overflow: "hidden",
-            }}
-          >
-            <Box
-              sx={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                height: 6,
-                background: "linear-gradient(90deg, #14b8a6, #22c55e, #a3e635)",
-              }}
-            />
-            <Stack
-              direction={{ xs: "column", md: "row" }}
-              spacing={2}
-              alignItems={{ md: "center" }}
-              justifyContent="space-between"
-              mb={2}
-            >
-              <Box>
-                <Typography variant="overline" sx={{ letterSpacing: 3, color: "text.secondary" }}>
-                  Student Support
-                </Typography>
-                <Typography variant="h6" mb={0.5}>Support Request</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Send a query to your faculty advisor for academic or counselling support.
-                </Typography>
-              </Box>
-              <Stack direction="row" spacing={1} flexWrap="wrap">
-                <Chip
-                  size="small"
-                  label={`Faculty: ${studentRecord?.faculty_id || queryFacultyId || "Unassigned"}`}
-                  variant="outlined"
-                  sx={{ borderColor: borderStrong, color: textPrimary }}
-                />
-              </Stack>
-            </Stack>
-            <Stack spacing={2}>
-              <TextField
-                label="Faculty ID"
-                value={queryFacultyId}
-                onChange={(event) => setQueryFacultyId(event.target.value)}
-                fullWidth
-                disabled={Boolean(studentRecord?.faculty_id)}
-                helperText={
-                  studentRecord?.faculty_id
-                    ? "Mapped to your faculty advisor"
-                    : "Enter the faculty ID for your request"
-                }
-                sx={inputSx}
-              />
-              <TextField
-                label="Describe your concern"
-                multiline
-                minRows={3}
-                value={queryReason}
-                onChange={(event) => setQueryReason(event.target.value)}
-                fullWidth
-                sx={inputSx}
-              />
-              <Box>
-                <Button
-                  variant="contained"
-                  sx={{
-                    textTransform: "none",
-                    fontWeight: 700,
-                    px: 3,
-                    borderRadius: 999,
-                    background: `linear-gradient(135deg, ${primaryMain} 0%, ${primaryLight} 100%)`,
-                    boxShadow: `0 12px 24px ${alpha(primaryMain, 0.35)}`,
-                    "&:hover": {
-                      background: `linear-gradient(135deg, ${primaryMain} 0%, ${primaryLight} 100%)`,
-                      boxShadow: `0 14px 26px ${alpha(primaryMain, 0.45)}`,
-                    },
-                  }}
-                  disabled={!studentRecord || !String(studentRecord?.faculty_id || queryFacultyId || "").trim()}
-                  onClick={handleSubmitQuery}
-                >
-                  Submit Query
-                </Button>
-              </Box>
-            </Stack>
-            {queryStatus?.type === "success" && (
-              <Alert severity="success" sx={{ mt: 2 }}>
-                {queryStatus.message}
-              </Alert>
-            )}
-            {queryStatus?.type === "error" && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                {queryStatus.message}
-              </Alert>
-            )}
-
-            <Divider sx={{ my: 3, borderColor: borderSoft }} />
-
-            <Stack
-              direction={{ xs: "column", md: "row" }}
-              spacing={2}
-              alignItems={{ md: "center" }}
-              justifyContent="space-between"
-              mb={2}
-            >
-              <Box>
-                <Typography variant="overline" sx={{ letterSpacing: 3, color: "text.secondary" }}>
-                  Support History
-                </Typography>
-                <Typography variant="h6" mb={0.5}>My Support Queries</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Track the status of your requests and responses.
-                </Typography>
-              </Box>
-              <Chip
-                size="small"
-                label={`Total: ${studentSupportRequests.length}`}
-                variant="outlined"
-              />
-            </Stack>
-            {!studentRecord && (
-              <Alert severity="info">Look up your registration number to view your query status.</Alert>
-            )}
-            {studentRecord && counsellingLoading && (
-              <Box display="flex" justifyContent="center" mt={2}>
-                <CircularProgress size={24} />
-              </Box>
-            )}
-            {studentRecord && !counsellingLoading && studentSupportRequests.length === 0 && (
-              <Alert severity="info">No support queries yet.</Alert>
-            )}
-            {studentRecord && studentSupportRequests.length > 0 && (
-              <Stack spacing={2}>
-                {studentSupportRequests.map((request) => (
-                  <Paper
-                    key={request.id}
-                    sx={{
-                      p: 2,
-                      bgcolor: alpha(surface, isDark ? 0.6 : 0.92),
-                      border: `1px solid ${borderSoft}`,
-                      boxShadow: `0 10px 20px ${alpha(theme.palette.common.black, isDark ? 0.25 : 0.06)}`,
-                      borderRadius: 3,
-                    }}
-                  >
-                    <Stack
-                      direction={{ xs: "column", md: "row" }}
-                      spacing={2}
-                      alignItems={{ md: "center" }}
-                      justifyContent="space-between"
-                    >
-                      <Box>
-                        <Typography fontWeight={600}>{request.reason || "Support request"}</Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Sent to {request.faculty_label || request.faculty_id || "Faculty"} - {formatRequestDate(request.request_date)}
-                        </Typography>
-                      </Box>
-                      <Chip
-                        label={request.status || "PENDING"}
-                        color={counsellingStatusColor(request.status)}
-                        sx={{ alignSelf: { xs: "flex-start", md: "center" } }}
-                      />
-                    </Stack>
-                  </Paper>
-                ))}
-              </Stack>
-            )}
-            {counsellingError && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                {counsellingError}
-              </Alert>
-            )}
-          </Paper>
-
-          <Paper sx={{ ...sectionPaperSx }}>
-            <Stack
-              direction={{ xs: "column", md: "row" }}
-              spacing={2}
-              alignItems={{ md: "center" }}
-              justifyContent="space-between"
-              mb={2}
-            >
-              <Box>
-                <Typography variant="overline" sx={{ letterSpacing: 3, color: "text.secondary" }}>
-                  Counselling Schedule
-                </Typography>
-                <Typography variant="h6" mb={0.5}>My Counselling Sessions</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Scheduled sessions shared by your faculty.
-                </Typography>
-              </Box>
-              <Chip size="small" label={`Total: ${studentScheduledSessions.length}`} variant="outlined" />
-            </Stack>
-            {!studentRecord && (
-              <Alert severity="info">Look up your registration number to view counselling sessions.</Alert>
-            )}
-            {studentRecord && counsellingLoading && (
-              <Box display="flex" justifyContent="center" mt={2}>
-                <CircularProgress size={24} />
-              </Box>
-            )}
-            {studentRecord && !counsellingLoading && studentScheduledSessions.length === 0 && (
-              <Alert severity="info">No counselling sessions scheduled yet.</Alert>
-            )}
-            {studentRecord && studentScheduledSessions.length > 0 && (
-              <Stack spacing={2}>
-                {studentScheduledSessions.map((request) => (
-                  <Paper
-                    key={request.id}
-                    sx={{
-                      p: 2,
-                      bgcolor: alpha(surface, isDark ? 0.6 : 0.92),
-                      border: `1px solid ${borderSoft}`,
-                      boxShadow: `0 10px 20px ${alpha(theme.palette.common.black, isDark ? 0.25 : 0.06)}`,
-                      borderRadius: 3,
-                    }}
-                  >
-                    <Stack
-                      direction={{ xs: "column", md: "row" }}
-                      spacing={2}
-                      alignItems={{ md: "center" }}
-                      justifyContent="space-between"
-                    >
-                      <Box>
-                        <Typography fontWeight={600}>
-                          {request.counselling_mode === "OFFLINE" ? "Offline Counselling" : "Online Counselling"}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {formatRequestDate(request.scheduled_at || request.request_date)}
-                          {request.classroom ? ` • Classroom ${request.classroom}` : ""}
-                        </Typography>
-                      </Box>
-                      {request.counselling_mode === "ONLINE" && request.meet_link ? (
-                        <Button
-                          variant="contained"
-                          color="primary"
-                          component="a"
-                          href={request.meet_link}
-                          target="_blank"
-                          rel="noreferrer"
-                          sx={{ textTransform: "none", borderRadius: 999 }}
-                        >
-                          Join Meet
-                        </Button>
-                      ) : (
-                        <Chip
-                          label={request.classroom ? "Room Assigned" : "Room TBA"}
-                          color="warning"
-                          variant="outlined"
-                        />
-                      )}
-                    </Stack>
-                  </Paper>
-                ))}
-              </Stack>
-            )}
-          </Paper>
         </>
       )}
 
