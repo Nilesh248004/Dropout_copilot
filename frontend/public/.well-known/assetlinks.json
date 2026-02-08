@@ -3,7 +3,7 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "com.dropout-copilot.app",
+      "package_name": "com.dropout_copilot.app",
       "sha256_cert_fingerprints": [
         "5C:1E:28:18:F2:2F:DB:F5:E1:9E:0C:C3:52:7C:F3:7E:B2:F4:16:DE:BF:14:0E:5D:07:A5:83:2D:79:24:14:34"
       ]
