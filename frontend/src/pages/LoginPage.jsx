@@ -38,6 +38,31 @@ const PRIMARY_ORIGINS = (
   .map((origin) => origin.trim())
   .filter(Boolean);
 const PRIMARY_ORIGIN = PRIMARY_ORIGINS[0] || "http://localhost:3000";
+
+const GOOGLE_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
+
+const loadGoogleApi = () =>
+  new Promise((resolve, reject) => {
+    if (typeof window === "undefined") return reject(new Error("window unavailable"));
+    if (window.google?.accounts?.id) return resolve(window.google.accounts.id);
+
+    let script = document.querySelector(`script[src="${GOOGLE_SCRIPT_SRC}"]`);
+    if (!script) {
+      script = document.createElement("script");
+      script.src = GOOGLE_SCRIPT_SRC;
+      script.async = true;
+      script.defer = true;
+      script.onload = () => resolve(window.google?.accounts?.id);
+      script.onerror = () => reject(new Error("Failed to load Google Identity script"));
+      document.head.appendChild(script);
+    } else {
+      script.addEventListener("load", () => resolve(window.google?.accounts?.id), { once: true });
+    }
+    // Fallback if already loaded after append
+    setTimeout(() => {
+      if (window.google?.accounts?.id) resolve(window.google.accounts.id);
+    }, 1000);
+  });
 const LoginPage = () => {
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
@@ -131,6 +156,27 @@ const LoginPage = () => {
     facultyIdTouchedRef.current = false;
     studentIdTouchedRef.current = false;
   };
+
+  // Load Google Identity script lazily to keep non-login pages lighter
+  useEffect(() => {
+    let cancelled = false;
+    loadGoogleApi()
+      .then((api) => {
+        if (cancelled) return;
+        if (api) {
+          googleApiRef.current = api;
+          setGoogleReady(true);
+        } else {
+          setGoogleError("Google sign-in unavailable. Please try again.");
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setGoogleError(err.message || "Unable to load Google sign-in.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleChange = (event) => {
     setAuthError("");
