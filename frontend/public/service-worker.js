@@ -38,9 +38,21 @@ self.addEventListener("fetch", (event) => {
     caches.match(request).then((cached) => {
       const networkFetch = fetch(request)
         .then((response) => {
-          // Only cache successful, same-origin/basic responses.
-          if (response && response.ok && response.type === "basic" && !response.bodyUsed) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
+          // Only cache successful, same-origin/basic responses that are safe to clone.
+          const sameOrigin = request.url.startsWith(self.location.origin);
+          const cacheable =
+            response &&
+            response.ok &&
+            response.type === "basic" &&
+            sameOrigin &&
+            !response.bodyUsed;
+          if (cacheable) {
+            try {
+              const copy = response.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+            } catch (_) {
+              // Ignore clone failures (e.g., already-used body)
+            }
           }
           return response;
         })
