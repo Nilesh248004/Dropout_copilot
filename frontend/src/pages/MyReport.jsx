@@ -225,7 +225,11 @@ const MyReport = () => {
     if (!Array.isArray(counsellingRequests)) return [];
     return counsellingRequests.filter((request) => {
       const meetLink = String(request?.meet_link || "").trim();
-      return meetLink.length === 0;
+      const classroom = String(request?.classroom || "").trim();
+      const mode = String(request?.counselling_mode || "").trim();
+      const scheduled = request?.scheduled_at || request?.scheduled_local;
+      // Treat as a support query only if it has no schedule/location/mode (i.e., raised via query form)
+      return !scheduled && !meetLink && !classroom && !mode;
     });
   }, [counsellingRequests]);
 

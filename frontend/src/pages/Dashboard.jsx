@@ -551,11 +551,19 @@ const Dashboard = () => {
         );
       })
     : counsellingRequests;
-  // Only show unresolved queries (PENDING) in the support table, hide scheduled/completed counselling
-  const facultySupportRequests = facultyScopedRequests.filter(
-    (request) => String(request.status || "").toUpperCase() === "PENDING"
-  );
-  const pendingRequestsCount = facultyScopedRequests.filter(
+
+  const isSupportQuery = (request) => {
+    const meetLink = String(request?.meet_link || "").trim();
+    const classroom = String(request?.classroom || "").trim();
+    const mode = String(request?.counselling_mode || "").trim();
+    const scheduled = request?.scheduled_at || request?.scheduled_local;
+    return !scheduled && !meetLink && !classroom && !mode;
+  };
+
+  // Only show query-style requests (no schedule/location) in the support table
+  const facultySupportRequests = facultyScopedRequests.filter((request) => isSupportQuery(request));
+
+  const pendingRequestsCount = facultySupportRequests.filter(
     (request) => String(request.status || "").toUpperCase() === "PENDING"
   ).length;
   const predictedCount = students.filter((student) => {
