@@ -1,13 +1,14 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { Box, Button, CssBaseline } from "@mui/material";
+import { Box, Button, CssBaseline, useMediaQuery } from "@mui/material";
 import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
-import { ThemeProvider } from "@mui/material/styles";
+import { ThemeProvider, useTheme } from "@mui/material/styles";
 import getTheme from "./styles/theme";
 
 // Components & Pages (lazy-loaded to shrink initial bundle)
 import Navbar from "./components/Navbar";
+import MobileNav from "./components/MobileNav";
 import { RoleProvider, useRole } from "./context/RoleContext";
 
 const Dashboard = React.lazy(() => import("./pages/Dashboard"));
@@ -49,11 +50,13 @@ const RoleDashboard = ({ roleName }) => {
 
 const AppLayout = ({ themeMode, onToggleTheme }) => {
   const location = useLocation();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const hideNavbar = location.pathname === "/login";
 
   return (
     <Suspense fallback={<Box sx={{ p: 4 }}>Loading...</Box>}>
-      {!hideNavbar && <Navbar themeMode={themeMode} onToggleTheme={onToggleTheme} />}
+      {!hideNavbar && !isMobile && <Navbar themeMode={themeMode} onToggleTheme={onToggleTheme} />}
       {hideNavbar && (
         <Box sx={{ position: "fixed", top: 16, right: 16, zIndex: 1300 }}>
           <Button
@@ -75,58 +78,63 @@ const AppLayout = ({ themeMode, onToggleTheme }) => {
           </Button>
         </Box>
       )}
-      <Routes>
-        {/* Redirect root to dashboard */}
-        <Route path="/" element={<Navigate to="/login" />} />
+      <Box sx={{ minHeight: "100vh", pb: !hideNavbar && isMobile ? 10 : 0 }}>
+        <Routes>
+          {/* Redirect root to dashboard */}
+          <Route path="/" element={<Navigate to="/login" />} />
 
-        {/* Dashboard */}
-        <Route path="/dashboard" element={<DashboardRedirect />} />
-        <Route path="/dashboard/student" element={<RoleDashboard roleName="student" />} />
-        <Route path="/dashboard/faculty" element={<RoleDashboard roleName="faculty" />} />
-        <Route path="/dashboard/admin" element={<RoleDashboard roleName="admin" />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/student/alerts"
-          element={<RoleRoute allowedRoles={["student"]} element={<StudentAlerts />} />}
-        />
-        <Route
-          path="/student/report"
-          element={<RoleRoute allowedRoles={["student"]} element={<MyReport />} />}
-        />
+          {/* Dashboard */}
+          <Route path="/dashboard" element={<DashboardRedirect />} />
+          <Route path="/dashboard/student" element={<RoleDashboard roleName="student" />} />
+          <Route path="/dashboard/faculty" element={<RoleDashboard roleName="faculty" />} />
+          <Route path="/dashboard/admin" element={<RoleDashboard roleName="admin" />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/student/alerts"
+            element={<RoleRoute allowedRoles={["student"]} element={<StudentAlerts />} />}
+          />
+          <Route
+            path="/student/report"
+            element={<RoleRoute allowedRoles={["student"]} element={<MyReport />} />}
+          />
 
-        {/* Add / Edit Student */}
-        <Route
-          path="/students/add"
-          element={<RoleRoute allowedRoles={["faculty", "admin"]} element={<AddStudentPage />} />}
-        />
-        <Route
-          path="/students/edit/:id"
-          element={<RoleRoute allowedRoles={["faculty", "admin"]} element={<EditStudent />} />}
-        />
+          {/* Add / Edit Student */}
+          <Route
+            path="/students/add"
+            element={<RoleRoute allowedRoles={["faculty", "admin"]} element={<AddStudentPage />} />}
+          />
+          <Route
+            path="/students/edit/:id"
+            element={<RoleRoute allowedRoles={["faculty", "admin"]} element={<EditStudent />} />}
+          />
 
-        {/* Student List Page */}
-        <Route
-          path="/studentlist"
-          element={<RoleRoute allowedRoles={["faculty", "admin"]} element={<StudentManagement />} />}
-        />
+          {/* Student List Page */}
+          <Route
+            path="/studentlist"
+            element={<RoleRoute allowedRoles={["faculty", "admin"]} element={<StudentManagement />} />}
+          />
 
-        {/* Student Analytics */}
-        <Route
-          path="/students/:id/analytics"
-          element={<RoleRoute allowedRoles={["faculty", "admin"]} element={<StudentAnalytics />} />}
-        />
-        <Route
-          path="/faculty/alerts"
-          element={<RoleRoute allowedRoles={["faculty"]} element={<FacultyAlerts />} />}
-        />
-        <Route
-          path="/admin/exports"
-          element={<RoleRoute allowedRoles={["admin"]} element={<FacultyExports />} />}
-        />
+          {/* Student Analytics */}
+          <Route
+            path="/students/:id/analytics"
+            element={<RoleRoute allowedRoles={["faculty", "admin"]} element={<StudentAnalytics />} />}
+          />
+          <Route
+            path="/faculty/alerts"
+            element={<RoleRoute allowedRoles={["faculty"]} element={<FacultyAlerts />} />}
+          />
+          <Route
+            path="/admin/exports"
+            element={<RoleRoute allowedRoles={["admin"]} element={<FacultyExports />} />}
+          />
 
-        {/* Catch all unmatched routes */}
-        <Route path="*" element={<Navigate to="/dashboard" />} />
-      </Routes>
+          {/* Catch all unmatched routes */}
+          <Route path="*" element={<Navigate to="/dashboard" />} />
+        </Routes>
+      </Box>
+      {!hideNavbar && isMobile && (
+        <MobileNav themeMode={themeMode} onToggleTheme={onToggleTheme} />
+      )}
     </Suspense>
   );
 };

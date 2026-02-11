@@ -5,8 +5,13 @@ body {
   margin: 0;
   font-family: 'Manrope', 'Space Grotesk', sans-serif;
   background-color: var(--app-bg, #f5f7fa);
+  background-image:
+    radial-gradient(circle at 18% 18%, rgba(37,99,235,0.10), transparent 32%),
+    radial-gradient(circle at 82% 0%, rgba(56,189,248,0.12), transparent 30%),
+    linear-gradient(180deg, rgba(15,23,42,0.10) 0%, rgba(15,23,42,0.16) 38%, rgba(15,23,42,0.10) 100%);
   color: var(--app-text, #0f172a);
-  transition: background-color 0.25s ease, color 0.25s ease;
+  min-height: 100vh;
+  transition: background-color 0.25s ease, color 0.25s ease, background 0.35s ease;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -24,10 +29,11 @@ button {
 
 .card {
   background: var(--app-surface, #ffffff);
-  border-radius: 12px;
+  border-radius: 14px;
   box-shadow: var(--app-card-shadow, 0 4px 12px rgba(0,0,0,0.05));
   padding: 16px;
   margin: 12px 0;
+  border: 1px solid rgba(148,163,184,0.14);
 }
 
 .container {
@@ -44,4 +50,28 @@ button {
 .MuiTableHead-root .MuiTableCell-root {
   background-color: var(--app-table-head-bg, #2563eb) !important;
   color: var(--app-table-head-text, #ffffff) !important;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+@media (max-width: 900px) {
+  body {
+    padding-bottom: 86px; /* allow space for mobile bottom nav */
+  }
+  .container {
+    width: 100%;
+    padding: 16px;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148,163,184,0.35);
+  border-radius: 999px;
 }

@@ -1,5 +1,6 @@
 /* Simple offline-first service worker */
-const CACHE_NAME = "copilot-pwa-v1";
+// Bump cache name to invalidate old entries after SW change.
+const CACHE_NAME = "copilot-pwa-v2";
 const PRECACHE_URLS = [
   "/",
   "/index.html",
@@ -26,12 +27,21 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
 
+  const url = new URL(request.url);
+  const isHttp = url.protocol === "http:" || url.protocol === "https:";
+  if (!isHttp || url.protocol === "chrome-extension:") {
+    // Ignore browser-extension, file:, data:, and other non-HTTP(s) requests.
+    return;
+  }
+
   event.respondWith(
     caches.match(request).then((cached) => {
       const networkFetch = fetch(request)
         .then((response) => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          // Only cache successful, same-origin/basic responses.
+          if (response.ok && response.type === "basic") {
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
+          }
           return response;
         })
         .catch(() => cached);
