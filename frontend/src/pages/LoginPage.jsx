@@ -93,6 +93,7 @@ const LoginPage = () => {
   const [pendingEmail, setPendingEmail] = useState("");
   const [pendingPassword, setPendingPassword] = useState("");
   const [pendingGoogleToken, setPendingGoogleToken] = useState("");
+  const [googleRendered, setGoogleRendered] = useState(false);
   const [copied, setCopied] = useState(false);
   const googleButtonRef = useRef(null);
   const googleApiRef = useRef(null);
@@ -525,6 +526,11 @@ const LoginPage = () => {
         shape: "pill",
         width,
       });
+      // If render fails (no children), fall back to our custom button.
+      setTimeout(() => {
+        const ok = Boolean(container.childElementCount);
+        setGoogleRendered(ok);
+      }, 120);
     };
 
     // Re-render button when toggling sign-in/sign-up mode and on resize.
@@ -532,6 +538,12 @@ const LoginPage = () => {
     window.addEventListener("resize", renderGoogleButton);
     return () => window.removeEventListener("resize", renderGoogleButton);
   }, [googleReady, mode]);
+
+  useEffect(() => {
+    if (!googleReady) {
+      setGoogleRendered(false);
+    }
+  }, [googleReady]);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -763,7 +775,7 @@ const LoginPage = () => {
 
             <Box>
               <Box ref={googleButtonRef} sx={{ width: "100%", minHeight: 44 }} />
-              {!googleReady && (
+              {(!googleReady || !googleRendered) && (
                 <Button
                   variant="outlined"
                   startIcon={<GoogleIcon />}
