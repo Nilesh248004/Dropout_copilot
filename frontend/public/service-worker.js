@@ -39,7 +39,7 @@ self.addEventListener("fetch", (event) => {
       const networkFetch = fetch(request)
         .then((response) => {
           // Only cache successful, same-origin/basic responses.
-          if (response.ok && response.type === "basic") {
+          if (response && response.ok && response.type === "basic" && !response.bodyUsed) {
             caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
           }
           return response;

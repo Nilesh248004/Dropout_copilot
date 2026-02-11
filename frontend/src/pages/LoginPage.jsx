@@ -83,6 +83,7 @@ const LoginPage = () => {
   const [selectedRole, setSelectedRole] = useState(role || "student");
   const [facultyIdInput, setFacultyIdInput] = useState(facultyId || "");
   const [studentIdInput, setStudentIdInput] = useState(studentId || "");
+  const [googleScriptLoaded, setGoogleScriptLoaded] = useState(false);
   const [googleReady, setGoogleReady] = useState(false);
   const [googleError, setGoogleError] = useState("");
   const [authError, setAuthError] = useState("");
@@ -166,7 +167,7 @@ const LoginPage = () => {
         if (cancelled) return;
         if (api) {
           googleApiRef.current = api;
-          setGoogleReady(true);
+          setGoogleScriptLoaded(true);
         } else {
           setGoogleError("Google sign-in unavailable. Please try again.");
         }
@@ -428,6 +429,7 @@ const LoginPage = () => {
     const maxAttempts = 10;
 
     const initGoogle = () => {
+      if (!googleScriptLoaded || cancelled) return;
       if (cancelled) return;
       const googleApi = window.google?.accounts?.id;
       if (!googleApi) {
@@ -507,7 +509,7 @@ const LoginPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [goToDashboard, email]);
+  }, [goToDashboard, email, googleScriptLoaded]);
 
   useEffect(() => {
     if (!googleReady) return;
