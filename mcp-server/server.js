@@ -5,7 +5,8 @@ import { createServer } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { Pool } from "pg";
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import WebSocket from "ws";
 import OpenAI from "openai";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -58,26 +59,28 @@ const getGroqClient = () => {
   return groqClient;
 };
 
-const useSsl =
-  process.env.DB_SSL === "true" ||
-  process.env.DB_SSL === "1" ||
-  (process.env.DATABASE_URL || "").includes("sslmode=");
+// Configure Neon for Node
+neonConfig.webSocketConstructor = WebSocket;
+neonConfig.useSecureWebSocket = true;
+neonConfig.pipelineTLS = true;
 
-const poolConfig = process.env.DATABASE_URL
-  ? { connectionString: process.env.DATABASE_URL }
-  : {
-      user: process.env.DB_USER || "postgres",
-      password: process.env.DB_PASSWORD,
-      host: process.env.DB_HOST || "localhost",
-      port: Number(process.env.DB_PORT || 5432),
-      database: process.env.DB_NAME || "dropout_copilot",
-    };
+const pool = new Pool({
+  connectionString:
+    process.env.DATABASE_URL ||
+    `postgresql://${process.env.DB_USER || "postgres"}:${encodeURIComponent(
+      process.env.DB_PASSWORD || ""
+    )}@${process.env.DB_HOST || "localhost"}:${Number(
+      process.env.DB_PORT || 5432
+    )}/${process.env.DB_NAME || "dropout_copilot"}?sslmode=require`,
+  ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: 10000,
+  idleTimeoutMillis: 30000,
+});
 
-if (useSsl) {
-  poolConfig.ssl = { rejectUnauthorized: false };
-}
-
-const pool = new Pool(poolConfig);
+// Prevent crashes on transient disconnects
+pool.on("error", (err) => {
+  console.error("Unexpected DB error (MCP):", err);
+});
 
 const toNumber = (value) => {
   const num = Number(value);

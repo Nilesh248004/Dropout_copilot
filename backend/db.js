@@ -1,30 +1,32 @@
 // db.js
-const { Pool } = require("pg");
+// Neon serverless driver over WebSocket/HTTPS to avoid blocked 5432 egress.
+const { Pool, neonConfig } = require("@neondatabase/serverless");
+const WebSocket = require("ws");
 
-const useSsl =
-  process.env.DB_SSL === "true" ||
-  process.env.DB_SSL === "1" ||
-  (process.env.DATABASE_URL || "").includes("sslmode=");
+// Configure Neon for Node
+neonConfig.webSocketConstructor = WebSocket;
+neonConfig.useSecureWebSocket = true;
+neonConfig.pipelineTLS = true;
 
-const poolConfig = process.env.DATABASE_URL
-  ? {
-      connectionString: process.env.DATABASE_URL,
-    }
-  : {
-      user: process.env.DB_USER || "postgres",
-      password: process.env.DB_PASSWORD || "Shreej@12",
-      host: process.env.DB_HOST || "localhost",
-      port: Number(process.env.DB_PORT || 5432),
-      database: process.env.DB_NAME || "dropout_copilot",
-    };
+const pool = new Pool({
+  connectionString:
+    process.env.DATABASE_URL ||
+    `postgresql://${process.env.DB_USER || "postgres"}:${encodeURIComponent(
+      process.env.DB_PASSWORD || "Shreej@12"
+    )}@${process.env.DB_HOST || "localhost"}:${Number(
+      process.env.DB_PORT || 5432
+    )}/${process.env.DB_NAME || "dropout_copilot"}?sslmode=require`,
+  ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: 10000,
+  idleTimeoutMillis: 30000,
+});
 
-if (useSsl) {
-  poolConfig.ssl = { rejectUnauthorized: false };
-}
+// Prevent crashes on transient disconnects
+pool.on("error", (err) => {
+  console.error("Unexpected DB error:", err);
+});
 
-const pool = new Pool(poolConfig);
-
-// Ensure every session uses UTC to avoid timezone drift on timestamp fields
+// Ensure every session uses UTC to avoid timezone drift
 pool.on("connect", async (client) => {
   try {
     await client.query("SET TIME ZONE 'UTC'");
@@ -33,8 +35,9 @@ pool.on("connect", async (client) => {
   }
 });
 
-pool.connect()
-  .then(() => console.log("✅ PostgreSQL Connected (TZ=UTC)"))
-  .catch(err => console.error("❌ DB Connection Error:", err));
+pool
+  .connect()
+  .then(() => console.log("✅ PostgreSQL Connected (TZ=UTC) via Neon serverless"))
+  .catch((err) => console.error("❌ DB Connection Error:", err));
 
 module.exports = pool;
