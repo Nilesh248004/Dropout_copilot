@@ -184,7 +184,12 @@ const App = () => {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <RoleProvider>
-        <Router>
+        <Router
+          future={{
+            v7_startTransition: true,
+            v7_relativeSplatPath: true,
+          }}
+        >
           <AppLayout themeMode={themeMode} onToggleTheme={toggleTheme} />
         </Router>
       </RoleProvider>

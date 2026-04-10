@@ -26,13 +26,30 @@ import { useRole } from "../context/RoleContext";
 import axios from "axios";
 import { API_BASE_URL } from "../config/api";
 
-const GOOGLE_CLIENT_ID =
-  process.env.REACT_APP_GOOGLE_CLIENT_ID ||
+const DEFAULT_GOOGLE_CLIENT_ID =
   "877119541780-lhrkbjv2kfb7ev8kmb1innnu7coifbs8.apps.googleusercontent.com";
+
+const resolveGoogleClientId = () => {
+  // Prefer explicit env overrides
+  const prodEnv = process.env.REACT_APP_GOOGLE_CLIENT_ID_PROD || process.env.REACT_APP_GOOGLE_CLIENT_ID;
+  const devEnv = process.env.REACT_APP_GOOGLE_CLIENT_ID_DEV;
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    const isLocal =
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1";
+    if (isLocal && devEnv) return devEnv;
+  }
+  return prodEnv || DEFAULT_GOOGLE_CLIENT_ID;
+};
+
+const GOOGLE_CLIENT_ID = resolveGoogleClientId();
 const PRIMARY_ORIGINS = (
   process.env.REACT_APP_PRIMARY_ORIGINS ||
   process.env.REACT_APP_PRIMARY_ORIGIN ||
-  "http://localhost:3000"
+  "http://localhost:3000,https://dropout-copilot.vercel.app,https://*.dropout-copilot.vercel.app"
 )
   .split(",")
   .map((origin) => origin.trim())

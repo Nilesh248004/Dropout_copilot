@@ -9,11 +9,54 @@ const axios = require("axios");
 
 const app = express();
 const server = http.createServer(app);
+
+const parseOrigins = (value) => {
+  if (!value) return [];
+  return String(value)
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+};
+
+const configuredOrigins = parseOrigins(process.env.CORS_ORIGIN);
+const defaultOrigins = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "https://dropout-copilot.vercel.app",
+];
+const vercelProdPattern = /^https?:\/\/([^.]+\\.)?dropout-copilot\\.vercel\\.app$/i;
+
+const isOriginAllowed = (origin) => {
+  if (!origin) return true; // non-browser client
+  const allOrigins = [...configuredOrigins, ...defaultOrigins];
+  if (allOrigins.includes("*")) return true;
+  if (allOrigins.includes(origin)) return true;
+  if (vercelProdPattern.test(origin)) return true;
+
+  // Support simple wildcard patterns like https://*.example.com
+  return allOrigins.some((allowed) => {
+    if (!allowed.includes("*")) return false;
+    const escaped = allowed
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\\\*/g, ".*");
+    const re = new RegExp(`^${escaped}$`, "i");
+    return re.test(origin);
+  });
+};
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (isOriginAllowed(origin)) return callback(null, true);
+    return callback(new Error(`Origin ${origin} not allowed by CORS`));
+  },
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+
 app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN || "*",
-  })
+  cors(corsOptions)
 );
+app.options("*", cors(corsOptions));
 app.use(express.json({ limit: "20mb" }));
 
 app.use((err, req, res, next) => {
@@ -75,6 +118,44 @@ const resetPredictionForStudent = async (studentId) => {
     [studentId]
   );
   await pool.query("DELETE FROM predictions WHERE student_id = $1", [studentId]);
+};
+
+const computeFallbackPrediction = (student) => {
+  const attendance = Number(student.attendance ?? 0);
+  const cgpa = Number(student.cgpa ?? 0);
+  const arrearCount = Number(student.arrear_count ?? 0);
+  const feesPaid = Number(student.fees_paid ?? 0);
+  const disciplinaryIssues = Number(student.disciplinary_issues ?? 0);
+
+  let risk_level = "LOW";
+  let risk_score = 0.2;
+
+  if (
+    attendance < 60 ||
+    cgpa < 5 ||
+    disciplinaryIssues >= 2 ||
+    (!feesPaid && attendance < 75) ||
+    arrearCount >= 4
+  ) {
+    risk_level = "HIGH";
+    risk_score = 0.85;
+  } else if (
+    (attendance >= 60 && attendance <= 70) ||
+    (cgpa >= 5 && cgpa < 6) ||
+    disciplinaryIssues === 1 ||
+    !feesPaid ||
+    arrearCount >= 2
+  ) {
+    risk_level = "MEDIUM";
+    risk_score = 0.55;
+  }
+
+  return {
+    risk_level,
+    risk_score,
+    dropout_prediction: ["HIGH", "MEDIUM"].includes(risk_level) ? 1 : 0,
+    source: "fallback",
+  };
 };
 
 // ================= LOGGER =================
@@ -741,14 +822,29 @@ app.post("/predict/:student_id", async (req, res) => {
       semester: Number(s.semester),
     };
 
-    console.log("📡 ML PAYLOAD:", payload);
+    console.log("[ML] payload:", payload);
 
-    const ml = await axios.post(`${ML_API_URL}/predict`, payload);
-    console.log("🤖 ML RESPONSE:", ml.data);
+    let mlData = null;
+    try {
+      const ml = await axios.post(`${ML_API_URL}/predict`, payload, { timeout: 10000 });
+      console.log("[ML] response:", ml.data);
+      mlData = ml.data;
+    } catch (err) {
+      console.warn(
+        "[ML] API unavailable, using fallback rules:",
+        err.response?.status || err.code || err.message
+      );
+      mlData = computeFallbackPrediction(payload);
+    }
 
-    const risk_score = ml.data.risk_score ?? 0;
-    const risk_level = ml.data.risk_level ?? "UNKNOWN";
-    const dropout = ml.data.dropout_prediction === 1 ? 1 : 0; // convert to integer
+    const risk_score = toNumberOrNull(mlData?.risk_score) ?? 0;
+    const risk_level = mlData?.risk_level ?? "UNKNOWN";
+    const dropout =
+      mlData?.dropout_prediction === 1 ||
+      mlData?.dropout === 1 ||
+      ["HIGH", "MEDIUM"].includes(String(mlData?.risk_level || "").toUpperCase())
+        ? 1
+        : 0; // convert to integer
 
     await client.query("BEGIN");
 

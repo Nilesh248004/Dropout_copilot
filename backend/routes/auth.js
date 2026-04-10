@@ -6,8 +6,18 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const { OAuth2Client } = require("google-auth-library");
 
-const GOOGLE_CLIENT_ID =
-  process.env.GOOGLE_CLIENT_ID ||
+const parseClientIds = (value) =>
+  String(value || "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+const GOOGLE_CLIENT_IDS = parseClientIds(
+  process.env.GOOGLE_CLIENT_IDS || process.env.GOOGLE_CLIENT_ID
+);
+
+const GOOGLE_PRIMARY_CLIENT_ID =
+  GOOGLE_CLIENT_IDS[0] ||
   "877119541780-lhrkbjv2kfb7ev8kmb1innnu7coifbs8.apps.googleusercontent.com";
 const RESET_CODE_TTL_MINUTES = Number.parseInt(
   process.env.RESET_CODE_TTL_MINUTES || "10",
@@ -538,10 +548,10 @@ router.post("/link-faculty", async (req, res) => {
     if (id_token) {
       authProvider = "google";
       try {
-        const client = new OAuth2Client(GOOGLE_CLIENT_ID);
+        const client = new OAuth2Client(GOOGLE_PRIMARY_CLIENT_ID);
         const ticket = await client.verifyIdToken({
           idToken: id_token,
-          audience: GOOGLE_CLIENT_ID,
+          audience: GOOGLE_CLIENT_IDS.length ? GOOGLE_CLIENT_IDS : GOOGLE_PRIMARY_CLIENT_ID,
         });
         const payload = ticket.getPayload();
         normalizedEmail = normalizeEmail(payload?.email);
@@ -636,16 +646,16 @@ router.post("/google", async (req, res) => {
     if (role === "student" && mode === "signup" && !roleStudentId) {
       return res.status(400).json({ error: "student_id is required for student signup" });
     }
-    if (!GOOGLE_CLIENT_ID) {
+    if (!GOOGLE_PRIMARY_CLIENT_ID) {
       return res.status(500).json({ error: "GOOGLE_CLIENT_ID not configured" });
     }
 
-    const client = new OAuth2Client(GOOGLE_CLIENT_ID);
+    const client = new OAuth2Client(GOOGLE_PRIMARY_CLIENT_ID);
     let payload;
     try {
       const ticket = await client.verifyIdToken({
         idToken: id_token,
-        audience: GOOGLE_CLIENT_ID,
+        audience: GOOGLE_CLIENT_IDS.length ? GOOGLE_CLIENT_IDS : GOOGLE_PRIMARY_CLIENT_ID,
       });
       payload = ticket.getPayload();
     } catch (verifyError) {
