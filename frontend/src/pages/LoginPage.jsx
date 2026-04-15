@@ -26,8 +26,10 @@ import { useRole } from "../context/RoleContext";
 import axios from "axios";
 import { API_BASE_URL } from "../config/api";
 
-const DEFAULT_GOOGLE_CLIENT_ID =
-  "877119541780-lhrkbjv2kfb7ev8kmb1innnu7coifbs8.apps.googleusercontent.com";
+const DEFAULT_GOOGLE_CLIENT_IDS = [
+  "679258509868-j0f1tji8ns4tjv3a4qi9is533crf7qem.apps.googleusercontent.com",
+  "877119541780-lhrkbjv2kfb7ev8kmb1innnu7coifbs8.apps.googleusercontent.com",
+];
 
 const resolveGoogleClientId = () => {
   // Prefer explicit env overrides
@@ -42,7 +44,27 @@ const resolveGoogleClientId = () => {
       host === "::1";
     if (isLocal && devEnv) return devEnv;
   }
-  return prodEnv || DEFAULT_GOOGLE_CLIENT_ID;
+  return prodEnv || DEFAULT_GOOGLE_CLIENT_IDS[0];
+};
+
+const originMatchesPattern = (origin, allowedOrigin) => {
+  if (!origin || !allowedOrigin) return false;
+  if (origin === allowedOrigin) return true;
+  if (!allowedOrigin.includes("*")) return false;
+  const escaped = allowedOrigin
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\\\*/g, ".*");
+  return new RegExp(`^${escaped}$`, "i").test(origin);
+};
+
+const formatGoogleAuthError = (data) => {
+  const baseMessage = data?.error || "Google sign-in failed.";
+  const detail = String(data?.details || "").trim();
+  if (!detail) return baseMessage;
+  if (/token audience/i.test(detail)) {
+    return `${baseMessage} ${detail} Update the frontend and backend Google client ID settings so they match.`;
+  }
+  return `${baseMessage} (${detail})`;
 };
 
 const GOOGLE_CLIENT_ID = resolveGoogleClientId();
@@ -416,7 +438,7 @@ const LoginPage = () => {
 
   const currentOrigin = typeof window !== "undefined" ? window.location.origin : "";
   const originMismatch =
-    currentOrigin && !PRIMARY_ORIGINS.includes(currentOrigin);
+    currentOrigin && !PRIMARY_ORIGINS.some((origin) => originMatchesPattern(currentOrigin, origin));
 
   const copyDiagnostics = async () => {
     try {
@@ -507,8 +529,7 @@ const LoginPage = () => {
                 );
               } catch (error) {
                 const data = error.response?.data;
-                const detail = data?.details ? ` (${data.details})` : "";
-                setAuthError(`${data?.error || "Google sign-in failed."}${detail}`);
+                setAuthError(formatGoogleAuthError(data));
               }
             },
           });

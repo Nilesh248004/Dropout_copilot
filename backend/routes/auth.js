@@ -12,13 +12,19 @@ const parseClientIds = (value) =>
     .map((id) => id.trim())
     .filter(Boolean);
 
-const GOOGLE_CLIENT_IDS = parseClientIds(
+const DEFAULT_GOOGLE_CLIENT_IDS = [
+  "679258509868-j0f1tji8ns4tjv3a4qi9is533crf7qem.apps.googleusercontent.com",
+  "877119541780-lhrkbjv2kfb7ev8kmb1innnu7coifbs8.apps.googleusercontent.com",
+];
+
+const configuredGoogleClientIds = parseClientIds(
   process.env.GOOGLE_CLIENT_IDS || process.env.GOOGLE_CLIENT_ID
 );
+const GOOGLE_CLIENT_IDS = configuredGoogleClientIds.length
+  ? configuredGoogleClientIds
+  : DEFAULT_GOOGLE_CLIENT_IDS;
 
-const GOOGLE_PRIMARY_CLIENT_ID =
-  GOOGLE_CLIENT_IDS[0] ||
-  "877119541780-lhrkbjv2kfb7ev8kmb1innnu7coifbs8.apps.googleusercontent.com";
+const GOOGLE_PRIMARY_CLIENT_ID = GOOGLE_CLIENT_IDS[0];
 const RESET_CODE_TTL_MINUTES = Number.parseInt(
   process.env.RESET_CODE_TTL_MINUTES || "10",
   10
@@ -33,6 +39,29 @@ const normalizeStudentId = (value) => (value || "").trim().toLowerCase();
 const normalizePhoneDigits = (value) => String(value || "").replace(/\D/g, "");
 const normalizePhoneForSend = (value) => String(value || "").trim();
 const isValidMode = (value) => value === "signin" || value === "signup";
+
+const getJwtAudience = (token) => {
+  try {
+    const [, payload] = String(token || "").split(".");
+    if (!payload) return "";
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const parsed = JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+    return String(parsed?.aud || "").trim();
+  } catch {
+    return "";
+  }
+};
+
+const formatGoogleVerifyError = (token, err) => {
+  const tokenAudience = getJwtAudience(token);
+  if (tokenAudience && !GOOGLE_CLIENT_IDS.includes(tokenAudience)) {
+    return `Token audience ${tokenAudience} does not match configured Google client IDs (${GOOGLE_CLIENT_IDS.join(
+      ", "
+    )}).`;
+  }
+  return err?.message || "Token verification failed";
+};
 
 const phoneMatches = (left, right) => {
   const leftDigits = normalizePhoneDigits(left);
@@ -558,7 +587,7 @@ router.post("/link-faculty", async (req, res) => {
       } catch (verifyError) {
         return res.status(401).json({
           error: "Invalid Google token",
-          details: verifyError.message || "Token verification failed",
+          details: formatGoogleVerifyError(id_token, verifyError),
         });
       }
     }
@@ -662,7 +691,7 @@ router.post("/google", async (req, res) => {
       console.error("GOOGLE TOKEN VERIFY ERROR:", verifyError);
       return res.status(401).json({
         error: "Invalid Google token",
-        details: verifyError.message || "Token verification failed",
+        details: formatGoogleVerifyError(id_token, verifyError),
       });
     }
     const normalizedEmail = normalizeEmail(payload?.email);

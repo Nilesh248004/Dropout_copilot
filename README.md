@@ -24,6 +24,7 @@ Required:
 - `PORT`
 - `ML_API_URL`
 - `CORS_ORIGIN`
+- `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_IDS`
 
 Optional (features):
 - `MCP_ENABLED`, `MCP_SERVER_URL`, `MCP_URL`, `MCP_API_KEY`
@@ -44,4 +45,3 @@ Optional (LLM providers):
 - `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_BASE_URL`
 - `OLLAMA_BASE_URL`, `OLLAMA_MODEL`
 - `MCP_SERVER_URL`, `MCP_SERVER_LABEL`
-
