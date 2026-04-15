@@ -1,43 +1,93 @@
 // db.js
-// Neon serverless driver over WebSocket/HTTPS to avoid blocked 5432 egress.
-const { Pool, neonConfig } = require("@neondatabase/serverless");
+// Use Neon over WebSocket only for Neon-hosted databases, and fall back
+// to the standard pg driver for local or other Postgres instances.
+const { Pool: NeonPool, neonConfig } = require("@neondatabase/serverless");
+const { Pool: PgPool } = require("pg");
 const WebSocket = require("ws");
 
-// Configure Neon for Node
-neonConfig.webSocketConstructor = WebSocket;
-neonConfig.useSecureWebSocket = true;
-neonConfig.pipelineTLS = true;
+const parseBoolean = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on", "require", "required"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off", "disable", "disabled"].includes(normalized)) {
+    return false;
+  }
+  return null;
+};
 
-const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL ||
-    `postgresql://${process.env.DB_USER || "postgres"}:${encodeURIComponent(
-      process.env.DB_PASSWORD || "Shreej@12"
-    )}@${process.env.DB_HOST || "localhost"}:${Number(
-      process.env.DB_PORT || 5432
-    )}/${process.env.DB_NAME || "dropout_copilot"}?sslmode=require`,
-  ssl: { rejectUnauthorized: false },
-  connectionTimeoutMillis: 10000,
-  idleTimeoutMillis: 30000,
-});
+const defaultDbConfig = {
+  user: process.env.DB_USER || "postgres",
+  password: process.env.DB_PASSWORD || "Shreej@12",
+  host: process.env.DB_HOST || "localhost",
+  port: Number(process.env.DB_PORT || 5432),
+  database: process.env.DB_NAME || "dropout_copilot",
+};
 
-// Prevent crashes on transient disconnects
+const databaseUrl = process.env.DATABASE_URL || "";
+
+const resolveDbHost = () => {
+  if (!databaseUrl) return defaultDbConfig.host;
+  try {
+    return new URL(databaseUrl).hostname || defaultDbConfig.host;
+  } catch {
+    return defaultDbConfig.host;
+  }
+};
+
+const resolvedDbHost = resolveDbHost();
+const isNeonConnection = /(^|\.)neon\.tech$/i.test(resolvedDbHost);
+const sslEnabled = parseBoolean(process.env.DB_SSL) ?? isNeonConnection;
+const sslOptions = sslEnabled ? { rejectUnauthorized: false } : undefined;
+
+if (isNeonConnection) {
+  neonConfig.webSocketConstructor = WebSocket;
+  neonConfig.useSecureWebSocket = true;
+  neonConfig.pipelineTLS = true;
+}
+
+const pool = isNeonConnection
+  ? new NeonPool({
+      connectionString:
+        databaseUrl ||
+        `postgresql://${defaultDbConfig.user}:${encodeURIComponent(
+          defaultDbConfig.password
+        )}@${defaultDbConfig.host}:${defaultDbConfig.port}/${defaultDbConfig.database}${
+          sslEnabled ? "?sslmode=require" : ""
+        }`,
+      ...(sslOptions ? { ssl: sslOptions } : {}),
+      connectionTimeoutMillis: 10000,
+      idleTimeoutMillis: 30000,
+    })
+  : new PgPool({
+      ...(databaseUrl ? { connectionString: databaseUrl } : defaultDbConfig),
+      ...(sslOptions ? { ssl: sslOptions } : {}),
+      max: 10,
+      connectionTimeoutMillis: 10000,
+      idleTimeoutMillis: 30000,
+    });
+
+const poolLabel = isNeonConnection ? "Neon serverless" : "pg";
+
 pool.on("error", (err) => {
   console.error("Unexpected DB error:", err);
 });
 
-// Ensure every session uses UTC to avoid timezone drift
 pool.on("connect", async (client) => {
   try {
     await client.query("SET TIME ZONE 'UTC'");
   } catch (err) {
-    console.warn("⚠️ Could not set UTC timezone for session:", err.message);
+    console.warn("Could not set UTC timezone for session:", err.message);
   }
 });
 
 pool
   .connect()
-  .then(() => console.log("✅ PostgreSQL Connected (TZ=UTC) via Neon serverless"))
-  .catch((err) => console.error("❌ DB Connection Error:", err));
+  .then((client) => {
+    client.release();
+    console.log(`PostgreSQL connected (TZ=UTC) via ${poolLabel}`);
+  })
+  .catch((err) => console.error("DB connection error:", err));
 
 module.exports = pool;

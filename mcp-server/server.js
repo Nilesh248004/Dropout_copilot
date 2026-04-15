@@ -5,7 +5,8 @@ import { createServer } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { Pool, neonConfig } from "@neondatabase/serverless";
+import { Pool as NeonPool, neonConfig } from "@neondatabase/serverless";
+import { Pool as PgPool } from "pg";
 import WebSocket from "ws";
 import OpenAI from "openai";
 
@@ -59,23 +60,68 @@ const getGroqClient = () => {
   return groqClient;
 };
 
-// Configure Neon for Node
-neonConfig.webSocketConstructor = WebSocket;
-neonConfig.useSecureWebSocket = true;
-neonConfig.pipelineTLS = true;
+const parseBoolean = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on", "require", "required"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off", "disable", "disabled"].includes(normalized)) {
+    return false;
+  }
+  return null;
+};
 
-const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL ||
-    `postgresql://${process.env.DB_USER || "postgres"}:${encodeURIComponent(
-      process.env.DB_PASSWORD || ""
-    )}@${process.env.DB_HOST || "localhost"}:${Number(
-      process.env.DB_PORT || 5432
-    )}/${process.env.DB_NAME || "dropout_copilot"}?sslmode=require`,
-  ssl: { rejectUnauthorized: false },
-  connectionTimeoutMillis: 10000,
-  idleTimeoutMillis: 30000,
-});
+const defaultDbConfig = {
+  user: process.env.DB_USER || "postgres",
+  password: process.env.DB_PASSWORD || "",
+  host: process.env.DB_HOST || "localhost",
+  port: Number(process.env.DB_PORT || 5432),
+  database: process.env.DB_NAME || "dropout_copilot",
+};
+
+const databaseUrl = process.env.DATABASE_URL || "";
+
+const resolveDbHost = () => {
+  if (!databaseUrl) return defaultDbConfig.host;
+  try {
+    return new URL(databaseUrl).hostname || defaultDbConfig.host;
+  } catch {
+    return defaultDbConfig.host;
+  }
+};
+
+const resolvedDbHost = resolveDbHost();
+const isNeonConnection = /(^|\.)neon\.tech$/i.test(resolvedDbHost);
+const sslEnabled = parseBoolean(process.env.DB_SSL) ?? isNeonConnection;
+const sslOptions = sslEnabled ? { rejectUnauthorized: false } : undefined;
+
+if (isNeonConnection) {
+  neonConfig.webSocketConstructor = WebSocket;
+  neonConfig.useSecureWebSocket = true;
+  neonConfig.pipelineTLS = true;
+}
+
+const pool = isNeonConnection
+  ? new NeonPool({
+      connectionString:
+        databaseUrl ||
+        `postgresql://${defaultDbConfig.user}:${encodeURIComponent(
+          defaultDbConfig.password
+        )}@${defaultDbConfig.host}:${defaultDbConfig.port}/${defaultDbConfig.database}${
+          sslEnabled ? "?sslmode=require" : ""
+        }`,
+      ...(sslOptions ? { ssl: sslOptions } : {}),
+      connectionTimeoutMillis: 10000,
+      idleTimeoutMillis: 30000,
+    })
+  : new PgPool({
+      ...(databaseUrl ? { connectionString: databaseUrl } : defaultDbConfig),
+      ...(sslOptions ? { ssl: sslOptions } : {}),
+      max: 10,
+      connectionTimeoutMillis: 10000,
+      idleTimeoutMillis: 30000,
+    });
 
 // Prevent crashes on transient disconnects
 pool.on("error", (err) => {
@@ -882,7 +928,6 @@ startServer().catch((err) => {
   console.error("Failed to start MCP server:", err);
   process.exit(1);
 });
-
 
 
 
