@@ -20,14 +20,36 @@ export const getStudents = async (facultyId) => {
  */
 export const batchPredictAll = async (facultyId) => {
   const students = await getStudents(facultyId);
+  const summary = {
+    total: students.length,
+    succeeded: 0,
+    skipped: 0,
+    failed: 0,
+    failures: [],
+  };
 
-  for (let s of students) {
+  for (const s of students) {
     try {
       await axios.post(`${API_BASE_URL}/predict/${s.id}`);
+      summary.succeeded += 1;
     } catch (err) {
-      console.error(`Prediction failed for student ${s.id}:`, err.message);
+      const message = err.response?.data?.error || err.message || "Prediction failed";
+      const isIncompleteData = err.response?.status === 400;
+
+      if (isIncompleteData) {
+        summary.skipped += 1;
+      } else {
+        summary.failed += 1;
+      }
+
+      summary.failures.push({
+        studentId: s.id,
+        name: s.name || `Student ${s.id}`,
+        message,
+      });
+      console.error(`Prediction failed for student ${s.id}:`, message);
     }
   }
 
-  return true;
+  return summary;
 };
