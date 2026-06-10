@@ -3,6 +3,7 @@ pipeline {
 
     environment {
         PATH = "/opt/homebrew/bin:/usr/local/bin:${PATH}"
+        PYTHON_BIN = "/opt/homebrew/bin/python3.12"
     }
 
     stages {
@@ -11,6 +12,16 @@ pipeline {
             steps {
                 echo 'Cloning repository...'
                 checkout scm
+            }
+        }
+
+        stage('Check Tools') {
+            steps {
+                echo 'Checking installed tools...'
+                sh 'node -v'
+                sh 'npm -v'
+                sh '${PYTHON_BIN} --version'
+                sh '${PYTHON_BIN} -m pip --version'
             }
         }
 
@@ -41,7 +52,12 @@ pipeline {
         stage('Install ML Service Dependencies') {
             steps {
                 dir('ml-service') {
-                    sh 'pip3 install -r requirements.txt'
+                    sh '''
+                        ${PYTHON_BIN} -m venv venv
+                        . venv/bin/activate
+                        python -m pip install --upgrade pip setuptools wheel
+                        pip install -r requirements.txt
+                    '''
                 }
             }
         }
@@ -57,7 +73,7 @@ pipeline {
         stage('Test Backend') {
             steps {
                 dir('backend') {
-                    sh 'npm test || echo "No tests found, skipping..."'
+                    sh 'npm test || echo "No backend tests found, skipping..."'
                 }
             }
         }
@@ -65,11 +81,13 @@ pipeline {
         stage('Test ML Service') {
             steps {
                 dir('ml-service') {
-                    sh 'python3 -m pytest || echo "No tests found, skipping..."'
+                    sh '''
+                        . venv/bin/activate
+                        python -m pytest || echo "No ML tests found, skipping..."
+                    '''
                 }
             }
         }
-
     }
 
     post {
