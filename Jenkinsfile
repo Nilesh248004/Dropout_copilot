@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        NODE_VERSION = '18'
+        PATH = "/opt/homebrew/bin:/usr/local/bin:${PATH}"
     }
 
     stages {
@@ -74,10 +74,10 @@ pipeline {
 
     post {
         success {
-            echo 'BUILD SUCCESSFUL - All stages passed!'
+            echo 'BUILD SUCCESSFUL!'
         }
         failure {
-            echo 'BUILD FAILED - Check the logs above.'
+            echo 'BUILD FAILED - Check the logs.'
         }
     }
 }
